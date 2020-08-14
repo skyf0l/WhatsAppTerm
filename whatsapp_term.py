@@ -2,9 +2,11 @@
 
 from WhatsAppApi import Client
 
-client = Client()
+import time
 
-print('open')
+client = Client(debug=True)
+
+print('wa start')
 
 while True:
-    pass
+    time.sleep(0.25)
