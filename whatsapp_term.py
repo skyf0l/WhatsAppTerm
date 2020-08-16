@@ -4,13 +4,12 @@ from WhatsAppApi import Client
 
 import time
 
-client = Client(debug=True)
+client = Client(debug=True, enable_trace=True, restore_sessions=True)
 
-while True:
+while client.must_scan_qrcode():
     qrcodes = client.get_qrcode()
     print(qrcodes['small'])
-    if client.qrcode_ready_to_scan():
-        break
+    client.qrcode_ready_to_scan()
 
 
 while True:

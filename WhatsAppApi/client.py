@@ -42,8 +42,13 @@ class Client(object):
 
     whatsapp_wss_url = 'wss://web.whatsapp.com/ws'
     origin_url = 'https://web.whatsapp.com'
+    default_save_session_path = 'default.session'
 
-    def __init__(self, debug=False, enable_trace=False, trace_truncate=1000, timeout=10, **kwargs):
+    def __init__(self,
+        debug=False, enable_trace=False, trace_truncate=1000,
+        timeout=10,
+        restore_sessions=False,
+        **kwargs):
 
         self._debug = debug
         self._enable_trace = enable_trace
@@ -51,6 +56,7 @@ class Client(object):
         self._state = State.OPENING
 
         self._timeout = timeout
+        self._restore_sessions = restore_sessions
 
         self._on_open = kwargs.get('on_open')
         self._on_close = kwargs.get('on_close')
@@ -77,16 +83,13 @@ class Client(object):
             raise Exception('Cannot open websocket')
 
         self.loggin()
-        self.gen_key()
-        bin_qrcode = gen_qrcode(self._qrcode['ref'], self._publicKey, self._clientId)
-        self._qrcode['qrcode'] = render_qrcode(bin_qrcode)
 
     def loggin(self):
-        self._clientId = base64.b64encode(os.urandom(16))
+        self._clientId = str(base64.b64encode(os.urandom(16)), 'utf8')
         self._whatsappweb_version = get_whatsappweb_version()
 
         connection_query_name = 'connection_query'
-        connection_query_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, str(self._clientId), True]
+        connection_query_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, self._clientId, True]
         self.__send(connection_query_name, connection_query_json)
         connection_result = self.wait_query_pop_json(connection_query_name)
 
@@ -94,15 +97,65 @@ class Client(object):
             raise Exception('Websocket connection refused')
         
         self._qrcode = {
+            'must_scan': False,
             'id': 0,
             'ref': connection_result['ref'],
-            'ttl' : connection_result['ttl'] / 1000 - 15,
+            'ttl' : connection_result['ttl'] / 1000 - 1,
             'time' : connection_result['time']}
         self._qrcode['timeout'] = time.time() + self._qrcode['ttl']
 
-    def gen_key(self):
-        self._privateKey = curve25519.Private()
-        self._publicKey = self._privateKey.get_public()
+        if self._restore_sessions and os.path.exists(Client.default_save_session_path):
+            self.restore_session()
+        else:
+            self._qrcode['must_scan'] = True
+            self._privateKey = curve25519.Private()
+            self._publicKey = self._privateKey.get_public()
+
+            bin_qrcode = gen_qrcode(self._qrcode['ref'], self._publicKey, self._clientId)
+            self._qrcode['qrcode'] = render_qrcode(bin_qrcode)
+
+    def load_s1234_queries(self):
+        try:
+            conn_result = self.wait_json_pop_json('Conn')
+            blocklist_result = self.wait_json_pop_json('Blocklist')
+            stream_result = self.wait_json_pop_json('Stream')
+            props_result = self.wait_json_pop_json('Props')
+        except Exception:
+            return False
+        self._conn = conn_result[1]
+        self._blocklist = blocklist_result[1]
+        self._stream = stream_result[1]
+        self._props = props_result[1]
+        return True
+
+    def restore_session(self):
+        session_data = self.load_session(Client.default_save_session_path)
+        if session_data is None:
+            raise Exception('Invalid session data')
+        self._clientId = session_data['clientId']
+        restore_query_name = 'restore_query'
+        restore_query_json = ['admin', 'login', session_data['clientToken'], session_data['serverToken'], self._clientId, 'takeover']
+        self.__send(restore_query_name, restore_query_json)
+        restore_result = self.wait_query_pop_json(restore_query_name)
+
+        if restore_result['status'] == 401:
+            raise Exception('Unpaired from the phone')
+        if restore_result['status'] == 403:
+            raise Exception('Access denied')
+        if restore_result['status'] == 405:
+            raise Exception('Already logged in')
+        if restore_result['status'] == 409:
+            raise Exception('Logged in from another location')
+        if restore_result['status'] != 200:
+            raise Exception('Restore session refused')
+
+        if self.load_s1234_queries() == False:
+            raise Exception('Query timed out')
+
+        if self._restore_sessions:
+            self.save_session(Client.default_save_session_path)
+        if self._debug:
+            print('Session restored')
 
     def regen_qrcode(self):
         self._qrcode['id'] += 1
@@ -119,28 +172,44 @@ class Client(object):
 
         bin_qrcode = gen_qrcode(self._qrcode['ref'], self._publicKey, self._clientId)
         self._qrcode['qrcode'] = render_qrcode(bin_qrcode)
-        print('QRCode regenerated')
+
+        if self._debug:
+            print('QRCode regenerated')
 
     def qrcode_ready_to_scan(self):
-        try:
-            conn_result = self.wait_json_pop_json('Conn')
-            blocklist_result = self.wait_json_pop_json('Blocklist')
-            stream_result = self.wait_json_pop_json('Stream')
-            props_result = self.wait_json_pop_json('Props')
-
-        except Exception:
+        if self.load_s1234_queries() == False:
             self.regen_qrcode()
             return False
 
-        self._conn = conn_result
-        self._blocklist = blocklist_result
-        self._stream = stream_result
-        self._props = props_result
-        print('QRCode scanned')
+        if self._restore_sessions:
+            self.save_session(Client.default_save_session_path)
+        self._qrcode['must_scan'] = False
+
+        if self._debug:
+            print('QRCode scanned')
         return True
 
-    def get_qrcode(self):
-        return self._qrcode['qrcode']
+    def load_session(self, session_path):
+        f = open(session_path, 'r')
+        data = f.read()
+        f.close()
+        session_data = json.loads(data)
+        if 'clientId' not in session_data or 'serverToken' not in session_data or 'clientToken' not in session_data:
+            return None
+        if self._debug:
+            print('Session loaded')
+        return(session_data)
+
+    def save_session(self, session_path):
+        session_data = {
+            'clientId':self._clientId,
+            'serverToken':self._conn['serverToken'],
+            'clientToken':self._conn['clientToken']}
+        f = open(session_path, 'w')
+        f.write(json.dumps(session_data))
+        f.close()
+        if self._debug:
+            print('Session saved')
 
     def __send(self, messageTag, payload):
         msg = messageTag + ','
@@ -149,8 +218,8 @@ class Client(object):
         else:
             msg += payload
         if self._enable_trace:
-            if len(msg) > self._debug_truncate:
-                print('Send: {}'.format(msg[0:self._debug_truncate] + '...'))
+            if len(msg) > self._trace_truncate:
+                print('Send: {}'.format(msg[0:self._trace_truncate] + '...'))
             else:
                 print('Send: {}'.format(msg))
         self._ws.send(msg)
@@ -191,8 +260,8 @@ class Client(object):
 
     def __on_message(self, ws, msg):
         if self._enable_trace:
-            if len(msg) > self._debug_truncate:
-                print('Recv: {}'.format(msg[0:self._debug_truncate] + '...'))
+            if len(msg) > self._trace_truncate:
+                print('Recv: {}'.format(msg[0:self._trace_truncate] + '...'))
             else:
                 print('Recv: {}'.format(msg))
 
@@ -226,3 +295,12 @@ class Client(object):
             except Exception as e:
                 if self._debug:
                     print("error from callback {}: {}".format(callback, e))
+
+    def must_scan_qrcode(self):
+        return self._qrcode['must_scan']
+
+    def get_qrcode(self):
+        return self._qrcode['qrcode']
+                    
+    def get_pushname(self):
+        return self._conn['pushname']
