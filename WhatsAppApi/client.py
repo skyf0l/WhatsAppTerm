@@ -9,6 +9,8 @@ import threading
 import json
 import base64, os
 
+import curve25519
+
 from enum import Enum, unique
 
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
@@ -64,10 +66,16 @@ class Client(object):
         self._ws_thread = threading.Thread(target=self._ws.run_forever, kwargs={'origin': Client.origin_url})
         self._ws_thread.daemon = True
         self._ws_thread.start()
+        
 
-        if wait_until(lambda self: self._state == State.OPEN, 10, self=self) == False:
+        if wait_until(lambda self: self._state == State.OPEN or self._state == State.CLOSED, 10, self=self) == False:
             raise Exception('Websocket timed out')
+        if self._state == State.CLOSED:
+            raise Exception('Cannot open websocket')
 
+        self.loggin()
+
+    def loggin(self):
         self._client_id = base64.b64encode(os.urandom(16))
         self._whatsappweb_version = get_whatsappweb_version()
 
@@ -77,6 +85,24 @@ class Client(object):
         if wait_until(lambda self: 'connection_query' in self._received_msgs, 3, self=self) == False:
             raise Exception('Receive message timed out')
 
+        connection_result = json.loads(self._received_msgs.pop('connection_query'))
+
+        if connection_result['status'] != 200:
+            raise Exception('Websocket connection refused')
+        
+        self._qrcode = {
+            'ref': connection_result['ref'],
+            'ttl' : connection_result['ttl'],
+            'time' : connection_result['time']}
+        self._qrcode['string'] = self.gen_qrcode(self._qrcode['ref'], self._client_id)
+
+
+    def gen_qrcode(self, ref, clientId):
+        privateKey = curve25519.Private()
+        publicKey = privateKey.get_public()
+
+        qrstring = '{},{},{}'.format(ref, base64.b64encode(publicKey.serialize()), clientId)
+        return qrstring
 
     def __send(self, messageTag, payload):
         msg = messageTag + ','
