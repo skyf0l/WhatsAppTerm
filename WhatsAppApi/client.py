@@ -9,7 +9,9 @@ import threading
 import json
 import base64, os
 
+import pyqrcode
 import curve25519
+from .qrcode import render_qrcode
 
 from enum import Enum, unique
 
@@ -41,11 +43,12 @@ class Client(object):
     whatsapp_wss_url = 'wss://web.whatsapp.com/ws'
     origin_url = 'https://web.whatsapp.com'
 
-    def __init__(self, debug=False, enableTrace=False, **kwargs):
+    def __init__(self, debug=False, debug_truncate=1000, enableTrace=False, **kwargs):
 
         websocket.enableTrace(enableTrace)
 
         self._debug = debug
+        self._debug_truncate = debug_truncate
         self._state = State.OPENING
 
         self._on_open = kwargs.get('on_open')
@@ -67,19 +70,19 @@ class Client(object):
         self._ws_thread.daemon = True
         self._ws_thread.start()
         
-
         if wait_until(lambda self: self._state == State.OPEN or self._state == State.CLOSED, 10, self=self) == False:
             raise Exception('Websocket timed out')
         if self._state == State.CLOSED:
             raise Exception('Cannot open websocket')
 
         self.loggin()
+        self.gen_qrcode()
 
     def loggin(self):
-        self._client_id = base64.b64encode(os.urandom(16))
+        self._clientId = base64.b64encode(os.urandom(16))
         self._whatsappweb_version = get_whatsappweb_version()
 
-        loggin_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, str(self._client_id), True]
+        loggin_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, str(self._clientId), True]
         self.__send('connection_query', loggin_json)
 
         if wait_until(lambda self: 'connection_query' in self._received_msgs, 3, self=self) == False:
@@ -94,15 +97,24 @@ class Client(object):
             'ref': connection_result['ref'],
             'ttl' : connection_result['ttl'],
             'time' : connection_result['time']}
-        self._qrcode['string'] = self.gen_qrcode(self._qrcode['ref'], self._client_id)
 
+    def gen_qrcode(self):
+        self._privateKey = curve25519.Private()
+        self._publicKey = self._privateKey.get_public()
 
-    def gen_qrcode(self, ref, clientId):
-        privateKey = curve25519.Private()
-        publicKey = privateKey.get_public()
+        qrstring = '{},{},{}'.format(
+            self._qrcode['ref'],
+            str(base64.b64encode(self._publicKey.serialize()), 'utf8'),
+            str(self._clientId), 'utf8')
 
-        qrstring = '{},{},{}'.format(ref, base64.b64encode(publicKey.serialize()), clientId)
-        return qrstring
+        qrcode = pyqrcode.create(qrstring)
+        bin_qrcode = qrcode.text(quiet_zone=1)
+
+        big_qrcode, small_qrcode = render_qrcode(bin_qrcode)
+        self._qrcode['qrcode'] = {'big': big_qrcode, 'small': small_qrcode}
+
+    def get_qrcode(self):
+        return self._qrcode['qrcode']
 
     def __send(self, messageTag, payload):
         msg = messageTag + ','
@@ -116,7 +128,10 @@ class Client(object):
 
     def __on_message(self, ws, msg):
         if self._debug:
-            print('Recv: {}'.format(msg))
+            if len(msg) > self._debug_truncate:
+                print('Recv: {}'.format(msg[0:self._debug_truncate] + '...'))
+            else:
+                print('Recv: {}'.format(msg))
         messageTag = msg.split(',')[0]
         payload = msg[len(messageTag) + 1:]
         self._received_msgs[messageTag] = payload
