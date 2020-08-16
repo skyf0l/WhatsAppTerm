@@ -11,6 +11,7 @@ while client.must_scan_qrcode():
     print(qrcodes['small'])
     client.qrcode_ready_to_scan()
 
+client.loggout()
 
 while True:
     time.sleep(0.25)

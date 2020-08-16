@@ -150,6 +150,7 @@ class Client(object):
             raise Exception('Restore session refused')
 
         if self.load_s1234_queries() == False:
+            # Resolving challenge
             raise Exception('Query timed out')
 
         if self._restore_sessions:
@@ -210,6 +211,12 @@ class Client(object):
         f.close()
         if self._debug:
             print('Session saved')
+
+    def loggout(self):
+        loggout_query_name = 'goodbye,'
+        loggout_query_json = ["admin","Conn","disconnect"]
+        self.__send(loggout_query_name, loggout_query_json)
+        self._ws.close()
 
     def __send(self, messageTag, payload):
         msg = messageTag + ','
