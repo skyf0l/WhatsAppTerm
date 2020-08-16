@@ -6,10 +6,12 @@ import time
 
 client = Client(debug=True)
 
-print('wa start')
+while True:
+    qrcodes = client.get_qrcode()
+    print(qrcodes['small'])
+    if client.qrcode_ready_to_scan():
+        break
 
-qrcodes = client.get_qrcode()
-print(qrcodes['small'])
 
 while True:
     time.sleep(0.25)

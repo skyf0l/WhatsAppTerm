@@ -9,16 +9,16 @@ import threading
 import json
 import base64, os
 
-import pyqrcode
 import curve25519
-from .qrcode import render_qrcode
+from .qrcode import render_qrcode, gen_qrcode
 
 from enum import Enum, unique
 
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
     mustend = time.time() + timeout
     while time.time() < mustend:
-        if somepredicate(*args, **kwargs): return True
+        if somepredicate(*args, **kwargs):
+            return True
         time.sleep(period)
     return False
 
@@ -43,13 +43,14 @@ class Client(object):
     whatsapp_wss_url = 'wss://web.whatsapp.com/ws'
     origin_url = 'https://web.whatsapp.com'
 
-    def __init__(self, debug=False, debug_truncate=1000, enableTrace=False, **kwargs):
-
-        websocket.enableTrace(enableTrace)
+    def __init__(self, debug=False, enable_trace=False, trace_truncate=1000, timeout=10, **kwargs):
 
         self._debug = debug
-        self._debug_truncate = debug_truncate
+        self._enable_trace = enable_trace
+        self._trace_truncate = trace_truncate
         self._state = State.OPENING
+
+        self._timeout = timeout
 
         self._on_open = kwargs.get('on_open')
         self._on_close = kwargs.get('on_close')
@@ -70,48 +71,73 @@ class Client(object):
         self._ws_thread.daemon = True
         self._ws_thread.start()
         
-        if wait_until(lambda self: self._state == State.OPEN or self._state == State.CLOSED, 10, self=self) == False:
+        if wait_until(lambda self: self._state == State.OPEN or self._state == State.CLOSED, self._timeout, self=self) == False:
             raise Exception('Websocket timed out')
         if self._state == State.CLOSED:
             raise Exception('Cannot open websocket')
 
         self.loggin()
-        self.gen_qrcode()
+        self.gen_key()
+        bin_qrcode = gen_qrcode(self._qrcode['ref'], self._publicKey, self._clientId)
+        self._qrcode['qrcode'] = render_qrcode(bin_qrcode)
 
     def loggin(self):
         self._clientId = base64.b64encode(os.urandom(16))
         self._whatsappweb_version = get_whatsappweb_version()
 
-        loggin_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, str(self._clientId), True]
-        self.__send('connection_query', loggin_json)
-
-        if wait_until(lambda self: 'connection_query' in self._received_msgs, 3, self=self) == False:
-            raise Exception('Receive message timed out')
-
-        connection_result = json.loads(self._received_msgs.pop('connection_query'))
+        connection_query_name = 'connection_query'
+        connection_query_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, str(self._clientId), True]
+        self.__send(connection_query_name, connection_query_json)
+        connection_result = self.wait_query_pop_json(connection_query_name)
 
         if connection_result['status'] != 200:
             raise Exception('Websocket connection refused')
         
         self._qrcode = {
+            'id': 0,
             'ref': connection_result['ref'],
-            'ttl' : connection_result['ttl'],
+            'ttl' : connection_result['ttl'] / 1000 - 15,
             'time' : connection_result['time']}
+        self._qrcode['timeout'] = time.time() + self._qrcode['ttl']
 
-    def gen_qrcode(self):
+    def gen_key(self):
         self._privateKey = curve25519.Private()
         self._publicKey = self._privateKey.get_public()
 
-        qrstring = '{},{},{}'.format(
-            self._qrcode['ref'],
-            str(base64.b64encode(self._publicKey.serialize()), 'utf8'),
-            str(self._clientId), 'utf8')
+    def regen_qrcode(self):
+        self._qrcode['id'] += 1
 
-        qrcode = pyqrcode.create(qrstring)
-        bin_qrcode = qrcode.text(quiet_zone=1)
+        new_qrcode_query_name = '{}.{}'.format('new_qrcode_query', '--{}'.format(self._qrcode['id']))
+        new_qrcode_query_json = ["admin","Conn","reref"]
+        self.__send(new_qrcode_query_name, new_qrcode_query_json)
+        new_qrcode_result = self.wait_query_pop_json(new_qrcode_query_name)
 
-        big_qrcode, small_qrcode = render_qrcode(bin_qrcode)
-        self._qrcode['qrcode'] = {'big': big_qrcode, 'small': small_qrcode}
+        if new_qrcode_result['status'] != 200:
+            raise Exception('Websocket connection refused')
+        self._qrcode['ref'] = new_qrcode_result['ref']
+        self._qrcode['timeout'] = time.time() + self._qrcode['ttl']
+
+        bin_qrcode = gen_qrcode(self._qrcode['ref'], self._publicKey, self._clientId)
+        self._qrcode['qrcode'] = render_qrcode(bin_qrcode)
+        print('QRCode regenerated')
+
+    def qrcode_ready_to_scan(self):
+        try:
+            conn_result = self.wait_json_pop_json('Conn')
+            blocklist_result = self.wait_json_pop_json('Blocklist')
+            stream_result = self.wait_json_pop_json('Stream')
+            props_result = self.wait_json_pop_json('Props')
+
+        except Exception:
+            self.regen_qrcode()
+            return False
+
+        self._conn = conn_result
+        self._blocklist = blocklist_result
+        self._stream = stream_result
+        self._props = props_result
+        print('QRCode scanned')
+        return True
 
     def get_qrcode(self):
         return self._qrcode['qrcode']
@@ -122,19 +148,61 @@ class Client(object):
             msg += json.dumps(payload)
         else:
             msg += payload
-        if self._debug:
-            print('Send: {}'.format(msg))
+        if self._enable_trace:
+            if len(msg) > self._debug_truncate:
+                print('Send: {}'.format(msg[0:self._debug_truncate] + '...'))
+            else:
+                print('Send: {}'.format(msg))
         self._ws.send(msg)
 
+    def find_json_in_received_msgs(self, json_name):
+        for key in self._received_msgs.keys():
+            msg = self._received_msgs[key]
+            if 'json' in msg:
+                if json_name in msg['json']:
+                    return key
+        return None
+
+    def wait_json(self, json_name):
+        if wait_until(lambda self: self.find_json_in_received_msgs(json_name) != None, self._timeout, self=self) == False:
+            raise Exception('Receive message timed out')
+
+    def wait_json_pop_data(self, json_name):
+        self.wait_json(json_name)
+        key = self.find_json_in_received_msgs(json_name)
+        return self._received_msgs.pop(key)['data']
+
+    def wait_json_pop_json(self, json_name):
+        self.wait_json(json_name)
+        key = self.find_json_in_received_msgs(json_name)
+        return self._received_msgs.pop(key)['json']
+
+    def wait_query(self, query_name):
+        if wait_until(lambda self: query_name in self._received_msgs, self._timeout, self=self) == False:
+            raise Exception('Receive message timed out')
+
+    def wait_query_pop_data(self, query_name):
+        self.wait_query(query_name)
+        return self._received_msgs.pop(query_name)['data']
+
+    def wait_query_pop_json(self, query_name):
+        self.wait_query(query_name)
+        return self._received_msgs.pop(query_name)['json']
+
     def __on_message(self, ws, msg):
-        if self._debug:
+        if self._enable_trace:
             if len(msg) > self._debug_truncate:
                 print('Recv: {}'.format(msg[0:self._debug_truncate] + '...'))
             else:
                 print('Recv: {}'.format(msg))
+
         messageTag = msg.split(',')[0]
-        payload = msg[len(messageTag) + 1:]
-        self._received_msgs[messageTag] = payload
+
+        msg_data = {'data': msg[len(messageTag) + 1:]}
+        try: msg_data['json'] = json.loads(msg_data['data'])
+        except ValueError: pass
+
+        self._received_msgs[messageTag] = msg_data
 
     def __on_error(self, ws, err):
         print(err)

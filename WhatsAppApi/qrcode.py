@@ -1,3 +1,6 @@
+import base64
+import pyqrcode
+
 def split_by_line(string, line):
     splited = []
     lines = string.splitlines()
@@ -30,4 +33,15 @@ def render_qrcode(bin_qrcode):
 
     big_qrcode = big_qrcode[:-1]
     small_qrcode = small_qrcode[:-1]
-    return (big_qrcode, small_qrcode)
+    return {'big': big_qrcode, 'small': small_qrcode}
+
+def gen_qrcode(ref, publicKey, clientId):
+
+    qrstring = '{},{},{}'.format(
+        ref,
+        str(base64.b64encode(publicKey.serialize()), 'utf8'),
+        str(clientId), 'utf8')
+
+    qrcode = pyqrcode.create(qrstring)
+    bin_qrcode = qrcode.text(quiet_zone=1)
+    return bin_qrcode
