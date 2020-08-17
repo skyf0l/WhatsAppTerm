@@ -7,7 +7,8 @@ import time
 import threading
 
 import json
-import base64, os
+import os
+from base64 import b64encode, b64decode
 
 import hashlib
 import hmac
@@ -105,7 +106,7 @@ class Client(object):
         self.login()
 
     def login(self):
-        self._clientId = str(base64.b64encode(os.urandom(16)), 'utf8')
+        self._clientId = str(b64encode(os.urandom(16)), 'utf8')
         self._whatsappweb_version = get_whatsappweb_version()
 
         connection_query_name = 'connection_query'
@@ -136,16 +137,19 @@ class Client(object):
 
     def load_s1234_queries(self):
         try:
-            conn_result = self.wait_json_pop_json('Conn')
-            blocklist_result = self.wait_json_pop_json('Blocklist')
-            stream_result = self.wait_json_pop_json('Stream')
-            props_result = self.wait_json_pop_json('Props')
+            conn_result = self.wait_json_pop_json('Conn')[1]
+            blocklist_result = self.wait_json_pop_json('Blocklist')[1]
+            stream_result = self.wait_json_pop_json('Stream')[1]
+            props_result = self.wait_json_pop_json('Props')[1]
         except Exception:
             return False
-        self._conn = conn_result[1]
-        self._blocklist = blocklist_result[1]
-        self._stream = stream_result[1]
-        self._props = props_result[1]
+        self._conn = conn_result
+        self._blocklist = blocklist_result
+        self._stream = stream_result
+        self._props = props_result
+
+        self._clientToken = self._conn['clientToken']
+        self._serverToken = self._conn['serverToken']
         return True
 
     def restore_session(self):
@@ -153,11 +157,23 @@ class Client(object):
         if session_data is None:
             raise Exception('Invalid session data')
         self._clientId = session_data['clientId']
-        restore_query_name = 'restore_query'
-        restore_query_json = ['admin', 'login', session_data['clientToken'], session_data['serverToken'], self._clientId, 'takeover']
-        self.__send(restore_query_name, restore_query_json)
-        restore_result = self.wait_query_pop_json(restore_query_name)
+        self._clientToken = session_data['clientToken']
+        self._serverToken = session_data['serverToken']
+        self._encKey = b64decode(session_data['encKey'])
+        self._macKey = b64decode(session_data['macKey'])
 
+        restore_query_name = 'restore_query'
+        restore_query_json = ['admin', 'login', self._clientToken, self._serverToken, self._clientId, 'takeover']
+        self.__send(restore_query_name, restore_query_json)
+
+        # return error or challenge
+        if wait_until(lambda self: restore_query_name in self._received_msgs or self.find_json_in_received_msgs('Cmd') != None, self._timeout, self=self) == False:
+            raise Exception('Receive message timed out')
+
+        if self.find_json_in_received_msgs('Cmd') != None:
+            self.resolve_challenge()
+
+        restore_result = self.wait_query_pop_json(restore_query_name)
         if restore_result['status'] == 401:
             raise Exception('Unpaired from the phone')
         if restore_result['status'] == 403:
@@ -170,13 +186,29 @@ class Client(object):
             raise Exception('Restore session refused')
 
         if self.load_s1234_queries() == False:
-            # Resolving challenge
             raise Exception('Query timed out')
 
         if self._restore_sessions:
             self.save_session(Client.default_save_session_path)
         if self._debug:
             print('Session restored')
+
+    def resolve_challenge(self):
+        cmd_result = self.wait_json_pop_json('Cmd')[1]
+        if cmd_result['type'] != 'challenge':
+            raise Exception('Challenge expected')
+
+        challenge = b64decode(cmd_result['challenge'])
+        signed_challenge = HmacSha256(challenge, self._macKey)
+        result = challenge + signed_challenge
+
+        challenge_query_name = 'challenge'
+        challenge_query_json = ['admin', 'challenge', str(b64encode(result), 'utf8'), self._serverToken, self._clientId]
+        self.__send(challenge_query_name, challenge_query_json)
+        challenge_result = self.wait_query_pop_json(challenge_query_name)
+
+        if challenge_result['status'] != 200:
+            raise Exception('Challenge refused')
 
     def regen_qrcode(self):
         self._qrcode['id'] += 1
@@ -202,17 +234,18 @@ class Client(object):
             self.regen_qrcode()
             return False
 
+        if self._debug:
+            print('QRCode scanned')
+
+        self.generate_keys()
+
         if self._restore_sessions:
             self.save_session(Client.default_save_session_path)
         self._qrcode['must_scan'] = False
-
-        if self._debug:
-            print('QRCode scanned')
-        self.generate_keys()
         return True
 
     def generate_keys(self):
-        secret = base64.b64decode(self._conn['secret'])
+        secret = b64decode(self._conn['secret'])
         if len(secret) != 144:
             raise Exception('Invalid secret')
 
@@ -236,8 +269,12 @@ class Client(object):
         f = open(session_path, 'r')
         data = f.read()
         f.close()
-        session_data = json.loads(data)
-        if 'clientId' not in session_data or 'serverToken' not in session_data or 'clientToken' not in session_data:
+        try:
+            session_data = json.loads(data)
+        except:
+            return None
+
+        if 'clientId' not in session_data or 'serverToken' not in session_data or 'clientToken' not in session_data or 'encKey' not in session_data or 'macKey' not in session_data:
             return None
         if self._debug:
             print('Session loaded')
@@ -245,11 +282,14 @@ class Client(object):
 
     def save_session(self, session_path):
         session_data = {
-            'clientId':self._clientId,
-            'serverToken':self._conn['serverToken'],
-            'clientToken':self._conn['clientToken']}
+            'clientId': self._clientId,
+            'clientToken': self._clientToken,
+            'serverToken': self._serverToken,
+            'encKey': str(b64encode(self._encKey), 'utf8'),
+            'macKey': str(b64encode(self._macKey), 'utf8')}
+        session_data_dump = json.dumps(session_data)
         f = open(session_path, 'w')
-        f.write(json.dumps(session_data))
+        f.write(session_data_dump)
         f.close()
         if self._debug:
             print('Session saved')

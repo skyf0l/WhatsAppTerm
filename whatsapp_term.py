@@ -4,7 +4,7 @@ from WhatsAppApi import Client
 
 import time
 
-client = Client(debug=True, enable_trace=True, restore_sessions=False)
+client = Client(debug=True, enable_trace=True, restore_sessions=True)
 
 while client.must_scan_qrcode():
     qrcodes = client.get_qrcode()
