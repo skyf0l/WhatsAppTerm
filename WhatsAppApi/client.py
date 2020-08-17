@@ -9,6 +9,13 @@ import threading
 import json
 import base64, os
 
+import hashlib
+import hmac
+from hkdf import hkdf_expand
+
+from Crypto import Random
+from Crypto.Cipher import AES
+
 import curve25519
 from .qrcode import render_qrcode, gen_qrcode
 
@@ -31,6 +38,19 @@ def get_whatsappweb_version():
     if m is None:
         raise Exception('Can\'t find WhatsAppWeb version')
     return [int(m.group(1)), int(m.group(2)), int(m.group(3))]
+
+def HmacSha256(secret, message):
+    return hmac.new(secret, message, digestmod=hashlib.sha256).digest()
+
+def AESEncrypt(key, plainbits):
+    iv = Random.new().read(AES.block_size)
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    return iv + cipher.encrypt(plainbits)
+
+def AESDecrypt(key, cipherbits):
+    iv = cipherbits[:AES.block_size]
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    return cipher.decrypt(cipherbits[AES.block_size:])
 
 @unique
 class State(Enum):
@@ -82,9 +102,9 @@ class Client(object):
         if self._state == State.CLOSED:
             raise Exception('Cannot open websocket')
 
-        self.loggin()
+        self.login()
 
-    def loggin(self):
+    def login(self):
         self._clientId = str(base64.b64encode(os.urandom(16)), 'utf8')
         self._whatsappweb_version = get_whatsappweb_version()
 
@@ -188,7 +208,29 @@ class Client(object):
 
         if self._debug:
             print('QRCode scanned')
+        self.generate_keys()
         return True
+
+    def generate_keys(self):
+        secret = base64.b64decode(self._conn['secret'])
+        if len(secret) != 144:
+            raise Exception('Invalid secret')
+
+        sharedSecret = self._privateKey.get_shared_key(curve25519.Public(secret[:32]), lambda a:a)
+
+        key_material = HmacSha256(('\0' * 32).encode('utf8'), sharedSecret)
+        sharedSecretExpanded = hkdf_expand(key_material, length=80, hash=hashlib.sha256)
+        if HmacSha256(sharedSecretExpanded[32:64], secret[:32] + secret[64:]) != secret[32:64]:
+            raise Exception('Login aborted')
+
+        keysEncrypted = sharedSecretExpanded[64:] + secret[64:]
+        keysDecrypted = AESDecrypt(sharedSecretExpanded[:32], keysEncrypted)
+
+        self._encKey = keysDecrypted[:32]
+        self._macKey = keysDecrypted[32:64]
+
+        if self._debug:
+            print('Keys generated')
 
     def load_session(self, session_path):
         f = open(session_path, 'r')
@@ -212,7 +254,7 @@ class Client(object):
         if self._debug:
             print('Session saved')
 
-    def loggout(self):
+    def logout(self):
         loggout_query_name = 'goodbye,'
         loggout_query_json = ["admin","Conn","disconnect"]
         self.__send(loggout_query_name, loggout_query_json)
