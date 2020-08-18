@@ -22,6 +22,8 @@ from .qrcode import render_qrcode, gen_qrcode
 
 from enum import Enum, unique
 
+from .binary_parser import read_binary, write_binary
+
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
     mustend = time.time() + timeout
     while time.time() < mustend:
@@ -275,8 +277,12 @@ class Client(object):
         while True:
             messageTag = self.wait_one_msg()
             msg = self._received_msgs.pop(messageTag)
-            print(self.decrypt_msg(msg))
-            print()
+            binary_data = self.decrypt_msg(msg)
+            data = read_binary(binary_data)
+            print('=====')
+            print(binary_data)
+            print(data)
+            print('=====')
 
     def load_session(self, session_path):
         f = open(session_path, 'r')
