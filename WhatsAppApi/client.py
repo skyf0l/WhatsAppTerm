@@ -43,6 +43,9 @@ def get_whatsappweb_version():
 def HmacSha256(secret, message):
     return hmac.new(secret, message, digestmod=hashlib.sha256).digest()
 
+def HmacValidation_msg(macKey, messageContent):
+    return HmacSha256(macKey, messageContent[32:]) == messageContent[:32]
+
 def AESEncrypt(key, plainbits):
     iv = Random.new().read(AES.block_size)
     cipher = AES.new(key, AES.MODE_CBC, iv)
@@ -127,6 +130,7 @@ class Client(object):
 
         if self._restore_sessions and os.path.exists(Client.default_save_session_path):
             self.restore_session()
+            self.post_login()
         else:
             self._qrcode['must_scan'] = True
             self._privateKey = curve25519.Private()
@@ -242,6 +246,8 @@ class Client(object):
         if self._restore_sessions:
             self.save_session(Client.default_save_session_path)
         self._qrcode['must_scan'] = False
+
+        self.post_login()
         return True
 
     def generate_keys(self):
@@ -264,6 +270,13 @@ class Client(object):
 
         if self._debug:
             print('Keys generated')
+
+    def post_login(self):
+        while True:
+            messageTag = self.wait_one_msg()
+            msg = self._received_msgs.pop(messageTag)
+            print(self.decrypt_msg(msg))
+            print()
 
     def load_session(self, session_path):
         f = open(session_path, 'r')
@@ -294,10 +307,12 @@ class Client(object):
         if self._debug:
             print('Session saved')
 
+    # close session -> must to rescan the qrcode
     def logout(self):
-        loggout_query_name = 'goodbye,'
+        loggout_query_name = 'goodbye'
         loggout_query_json = ["admin","Conn","disconnect"]
-        self.__send(loggout_query_name, loggout_query_json)
+        self.__send(loggout_query_name + ',', loggout_query_json)
+        self.wait_query(loggout_query_name)
         self._ws.close()
 
     def __send(self, messageTag, payload):
@@ -347,6 +362,11 @@ class Client(object):
         self.wait_query(query_name)
         return self._received_msgs.pop(query_name)['json']
 
+    def wait_one_msg(self):
+        if wait_until(lambda self: len(self._received_msgs) > 0, self._timeout, self=self) == False:
+            raise Exception('Receive message timed out')
+        return next(iter(self._received_msgs))
+
     def __on_message(self, ws, msg):
         if self._enable_trace:
             if len(msg) > self._trace_truncate:
@@ -354,13 +374,23 @@ class Client(object):
             else:
                 print('Recv: {}'.format(msg))
 
-        messageTag = msg.split(',')[0]
-
-        msg_data = {'data': msg[len(messageTag) + 1:]}
-        try: msg_data['json'] = json.loads(msg_data['data'])
-        except ValueError: pass
+        if isinstance(msg, bytes):
+            messageTag = str(msg.split(b',')[0], 'utf8')
+            msg_data = {'data': msg[len(messageTag) + 1:]}
+        else:
+            messageTag = msg.split(',')[0]
+            msg_data = {'data': msg[len(messageTag) + 1:]}
+            try: msg_data['json'] = json.loads(msg_data['data'])
+            except ValueError: pass
 
         self._received_msgs[messageTag] = msg_data
+
+    def decrypt_msg(self, msg):
+        cipherbits = msg['data']
+        if HmacValidation_msg(self._macKey, cipherbits) != True:
+            return None
+        plainbits = AESDecrypt(self._encKey, cipherbits[32:])
+        return plainbits
 
     def __on_error(self, ws, err):
         print(err)
