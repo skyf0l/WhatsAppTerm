@@ -39,7 +39,7 @@ def get_whatsappweb_version():
     result = requests.get(url, headers=headers)
     m = re.search(r'l=\"([0-9]+)\.([0-9]+)\.([0-9]+)\"', result.text)
     if m is None:
-        raise Exception('Can\'t find WhatsAppWeb version')
+        raise ValueError('Can\'t find WhatsAppWeb version')
     return [int(m.group(1)), int(m.group(2)), int(m.group(3))]
 
 def HmacSha256(secret, message):
@@ -104,9 +104,9 @@ class Client(object):
         self._ws_thread.start()
         
         if wait_until(lambda self: self._state == State.OPEN or self._state == State.CLOSED, self._timeout, self=self) == False:
-            raise Exception('Websocket timed out')
+            raise TimeoutError('Websocket timed out')
         if self._state == State.CLOSED:
-            raise Exception('Cannot open websocket')
+            raise ConnectionRefusedError('Cannot open websocket')
 
         self.login()
 
@@ -120,7 +120,7 @@ class Client(object):
         connection_result = self.wait_query_pop_json(connection_query_name)
 
         if connection_result['status'] != 200:
-            raise Exception('Websocket connection refused')
+            raise ConnectionRefusedError('Websocket connection refused')
         
         self._qrcode = {
             'must_scan': False,
@@ -147,7 +147,7 @@ class Client(object):
             blocklist_result = self.wait_json_pop_json('Blocklist')[1]
             stream_result = self.wait_json_pop_json('Stream')[1]
             props_result = self.wait_json_pop_json('Props')[1]
-        except Exception:
+        except TimeoutError:
             return False
         self._conn = conn_result
         self._blocklist = blocklist_result
@@ -161,7 +161,7 @@ class Client(object):
     def restore_session(self):
         session_data = self.load_session(Client.default_save_session_path)
         if session_data is None:
-            raise Exception('Invalid session data')
+            raise ValueError('Invalid session data')
         self._clientId = session_data['clientId']
         self._clientToken = session_data['clientToken']
         self._serverToken = session_data['serverToken']
@@ -174,25 +174,25 @@ class Client(object):
 
         # return error or challenge
         if wait_until(lambda self: restore_query_name in self._received_msgs or self.find_json_in_received_msgs('Cmd') != None, self._timeout, self=self) == False:
-            raise Exception('Receive message timed out')
+            raise TimeoutError('Receive message timed out')
 
         if self.find_json_in_received_msgs('Cmd') != None:
             self.resolve_challenge()
 
         restore_result = self.wait_query_pop_json(restore_query_name)
         if restore_result['status'] == 401:
-            raise Exception('Unpaired from the phone')
+            raise ConnectionRefusedError('Unpaired from the phone')
         if restore_result['status'] == 403:
-            raise Exception('Access denied')
+            raise ConnectionRefusedError('Access denied')
         if restore_result['status'] == 405:
-            raise Exception('Already logged in')
+            raise ConnectionRefusedError('Already logged in')
         if restore_result['status'] == 409:
-            raise Exception('Logged in from another location')
+            raise ConnectionRefusedError('Logged in from another location')
         if restore_result['status'] != 200:
-            raise Exception('Restore session refused')
+            raise ConnectionRefusedError('Restore session refused')
 
         if self.load_s1234_queries() == False:
-            raise Exception('Query timed out')
+            raise TimeoutError('Query timed out')
 
         if self._restore_sessions:
             self.save_session(Client.default_save_session_path)
@@ -214,7 +214,7 @@ class Client(object):
         challenge_result = self.wait_query_pop_json(challenge_query_name)
 
         if challenge_result['status'] != 200:
-            raise Exception('Challenge refused')
+            raise ConnectionRefusedError('Challenge refused')
 
     def regen_qrcode(self):
         self._qrcode['id'] += 1
@@ -225,7 +225,7 @@ class Client(object):
         new_qrcode_result = self.wait_query_pop_json(new_qrcode_query_name)
 
         if new_qrcode_result['status'] != 200:
-            raise Exception('Websocket connection refused')
+            raise ConnectionRefusedError('Websocket connection refused')
         self._qrcode['ref'] = new_qrcode_result['ref']
         self._qrcode['timeout'] = time.time() + self._qrcode['ttl']
 
@@ -255,14 +255,14 @@ class Client(object):
     def generate_keys(self):
         secret = b64decode(self._conn['secret'])
         if len(secret) != 144:
-            raise Exception('Invalid secret')
+            raise ValueError('Invalid secret')
 
         sharedSecret = self._privateKey.get_shared_key(curve25519.Public(secret[:32]), lambda a:a)
 
         key_material = HmacSha256(('\0' * 32).encode('utf8'), sharedSecret)
         sharedSecretExpanded = hkdf_expand(key_material, length=80, hash=hashlib.sha256)
         if HmacSha256(sharedSecretExpanded[32:64], secret[:32] + secret[64:]) != secret[32:64]:
-            raise Exception('Login aborted')
+            raise ValueError('Hmac validation failed')
 
         keysEncrypted = sharedSecretExpanded[64:] + secret[64:]
         keysDecrypted = AESDecrypt(sharedSecretExpanded[:32], keysEncrypted)
@@ -277,11 +277,9 @@ class Client(object):
         while True:
             messageTag = self.wait_one_msg()
             msg = self._received_msgs.pop(messageTag)
-            binary_data = self.decrypt_msg(msg)
-            data = read_binary(binary_data)
+            data = self.decrypt_msg(msg)
             print('=====')
-            print(binary_data)
-            print(data)
+            print('{} : {}'.format(messageTag, data))
             print('=====')
 
     def load_session(self, session_path):
@@ -344,7 +342,7 @@ class Client(object):
 
     def wait_json(self, json_name):
         if wait_until(lambda self: self.find_json_in_received_msgs(json_name) != None, self._timeout, self=self) == False:
-            raise Exception('Receive message timed out')
+            raise TimeoutError('Receive message timed out')
 
     def wait_json_pop_data(self, json_name):
         self.wait_json(json_name)
@@ -358,7 +356,7 @@ class Client(object):
 
     def wait_query(self, query_name):
         if wait_until(lambda self: query_name in self._received_msgs, self._timeout, self=self) == False:
-            raise Exception('Receive message timed out')
+            raise TimeoutError('Receive message timed out')
 
     def wait_query_pop_data(self, query_name):
         self.wait_query(query_name)
@@ -370,7 +368,7 @@ class Client(object):
 
     def wait_one_msg(self):
         if wait_until(lambda self: len(self._received_msgs) > 0, self._timeout, self=self) == False:
-            raise Exception('Receive message timed out')
+            raise TimeoutError('Receive message timed out')
         return next(iter(self._received_msgs))
 
     def __on_message(self, ws, msg):
@@ -395,8 +393,9 @@ class Client(object):
         cipherbits = msg['data']
         if HmacValidation_msg(self._macKey, cipherbits) != True:
             return None
-        plainbits = AESDecrypt(self._encKey, cipherbits[32:])
-        return plainbits
+        binary_data = AESDecrypt(self._encKey, cipherbits[32:])
+        data = read_binary(binary_data)
+        return data
 
     def __on_error(self, ws, err):
         print(err)
