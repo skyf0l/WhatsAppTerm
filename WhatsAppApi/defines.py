@@ -1,3 +1,26 @@
+from .whatsapp_protobuf_pb2 import WebMessageInfo
+
+import json
+from google.protobuf import json_format
+
+"""
+inspired by
+    https://github.com/sigalor/whatsapp-web-reveng/blob/master/backend/whatsapp_defines.py
+"""
+
+class WebMessage:
+
+    @staticmethod
+    def decode(data):
+        msg = WebMessageInfo()
+        msg.ParseFromString(data)
+        return json.loads(json_format.MessageToJson(msg))
+
+    @staticmethod
+    def encode(msg):
+        data = json_format.Parse(json.dumps(msg), WebMessageInfo(), ignore_unknown_fields=True)
+        return data.SerializeToString()
+
 class Tags:
     LIST_EMPTY      = 0
     STREAM_END      = 2
@@ -43,3 +66,61 @@ ByteTokens = [
     'quick_reply', 'sticker', 'pay_t', 'accept', 'reject', 'sticker_pack',
     'invalid', 'canceled', 'missed', 'connected', 'result', 'audio',
     'video', 'recent']
+
+class Metrics:
+    DEBUG_LOG               = 1
+    QUERY_RESUME            = 2
+    QUERY_RECEIPT           = 3
+    QUERY_MEDIA             = 4
+    QUERY_CHAT              = 5
+    QUERY_CONTACTS          = 6
+    QUERY_MESSAGES          = 7
+    PRESENCE                = 8
+    PRESENCE_SUBSCRIBE      = 9
+    GROUP                   = 10
+    READ                    = 11
+    CHAT                    = 12
+    RECEIVED                = 13
+    PIC                     = 14
+    STATUS                  = 15
+    MESSAGE                 = 16
+    QUERY_ACTIONS           = 17
+    BLOCK                   = 18
+    QUERY_GROUP             = 19
+    QUERY_PREVIEW           = 20
+    QUERY_EMOJI             = 21
+    QUERY_MESSAGE_INFO      = 22
+    SPAM                    = 23
+    QUERY_SEARCH            = 24
+    QUERY_IDENTITY          = 25
+    QUERY_URL               = 26
+    PROFILE                 = 27
+    CONTACT                 = 28
+    QUERY_VCARD             = 29
+    QUERY_STATUS            = 30
+    QUERY_STATUS_UPDATE     = 31
+    PRIVACY_STATUS          = 32
+    QUERY_LIVE_LOCATIONS    = 33
+    LIVE_LOCATION           = 34
+    QUERY_VNAME             = 35
+    QUERY_LABELS            = 36
+    CALL                    = 37
+    QUERY_CALL              = 38
+    QUERY_QUICK_REPLIES     = 39
+    QUERY_CALL_OFFER        = 40
+    QUERY_RESPONSE          = 41
+    QUERY_STICKER_PACKS     = 42
+    QUERY_STICKERS          = 43
+    ADD_OR_REMOVE_LABELS    = 44
+    QUERY_NEXT_LABEL_COLOR  = 45
+    QUERY_LABEL_PALETTE     = 46
+    CREATE_OR_DELETE_LABELS = 47
+    EDIT_LABELS             = 48
+
+class MessageStatus:
+    Error       = 0
+    Pending     = 1
+    ServerAck   = 2
+    DeliveryAck = 3
+    Read        = 4
+    Played      = 5
