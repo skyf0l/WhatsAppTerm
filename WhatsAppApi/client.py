@@ -13,7 +13,6 @@ import binascii
 from base64 import b64encode, b64decode
 
 import hashlib
-import hmac
 from hkdf import hkdf_expand
 
 from Crypto import Random
@@ -27,6 +26,8 @@ from enum import Enum, unique
 from .defines import WebMessage, Metrics
 from .binary_reader import read_binary
 from .binary_writer import write_binary
+
+from .security import Hmac
 
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
     mustend = time.time() + timeout
@@ -48,12 +49,6 @@ def get_whatsappweb_version():
 
 def getTimestamp():
     return int(time.time());
-
-def HmacSha256(secret, message):
-    return hmac.new(secret, message, digestmod=hashlib.sha256).digest()
-
-def HmacValidation_msg(macKey, messageContent):
-    return HmacSha256(macKey, messageContent[32:]) == messageContent[:32]
 
 def AESPad(s):
     bs = AES.block_size
@@ -190,6 +185,7 @@ class Client(object):
         self._serverToken = session_data['serverToken']
         self._encKey = b64decode(session_data['encKey'])
         self._macKey = b64decode(session_data['macKey'])
+        self._hmac = Hmac(self._macKey)
 
         restore_query_name = 'restore_query'
         restore_query_json = ['admin', 'login', self._clientToken, self._serverToken, self._clientId, 'takeover']
@@ -228,7 +224,7 @@ class Client(object):
             raise Exception('Challenge expected')
 
         challenge = b64decode(cmd_result['challenge'])
-        signed_challenge = HmacSha256(challenge, self._macKey)
+        signed_challenge = Hash(challenge).hash(self._macKey)
         result = challenge + signed_challenge
 
         challenge_query_name = 'challenge'
@@ -282,9 +278,9 @@ class Client(object):
 
         sharedSecret = self._privateKey.get_shared_key(curve25519.Public(secret[:32]), lambda a:a)
 
-        key_material = HmacSha256(('\0' * 32).encode('utf8'), sharedSecret)
+        key_material = Hmac(b'\0' * 32).hash(sharedSecret)
         sharedSecretExpanded = hkdf_expand(key_material, length=80, hash=hashlib.sha256)
-        if HmacSha256(sharedSecretExpanded[32:64], secret[:32] + secret[64:]) != secret[32:64]:
+        if Hmac(sharedSecretExpanded[32:64]).hash(secret[:32] + secret[64:]) != secret[32:64]:
             raise ValueError('Hmac validation failed')
 
         keysEncrypted = sharedSecretExpanded[64:] + secret[64:]
@@ -426,7 +422,7 @@ class Client(object):
 
     def decrypt_msg(self, msg):
         cipherbits = msg['data']
-        if HmacValidation_msg(self._macKey, cipherbits) != True:
+        if self._hmac.is_valid(cipherbits) != True:
             return None
         binary_data = AESDecrypt(self._encKey, cipherbits[32:])
         data = read_binary(binary_data)
@@ -434,7 +430,7 @@ class Client(object):
 
     def encrypt_msg(self, msg):
         enc = AESEncrypt(self._encKey, msg)
-        return HmacSha256(self._macKey, enc) + enc; 
+        return self._hmac.hash(enc) + enc; 
 
     def __on_error(self, ws, err):
         print(err)
