@@ -8,6 +8,8 @@ import threading
 
 import json
 import os
+
+import binascii
 from base64 import b64encode, b64decode
 
 import hashlib
@@ -22,7 +24,9 @@ from .qrcode import render_qrcode, gen_qrcode
 
 from enum import Enum, unique
 
-from .binary_parser import read_binary, write_binary
+from .defines import WebMessage, Metrics
+from .binary_reader import read_binary
+from .binary_writer import write_binary
 
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
     mustend = time.time() + timeout
@@ -42,13 +46,24 @@ def get_whatsappweb_version():
         raise ValueError('Can\'t find WhatsAppWeb version')
     return [int(m.group(1)), int(m.group(2)), int(m.group(3))]
 
+def getTimestamp():
+    return int(time.time());
+
 def HmacSha256(secret, message):
     return hmac.new(secret, message, digestmod=hashlib.sha256).digest()
 
 def HmacValidation_msg(macKey, messageContent):
     return HmacSha256(macKey, messageContent[32:]) == messageContent[:32]
 
+def AESPad(s):
+    bs = AES.block_size
+    return s + (bs - len(s) % bs) * chr(bs - len(s) % bs).encode('utf8')
+
+def AESUnpad(s):
+    return s[:-ord(s[len(s)-1:])];
+
 def AESEncrypt(key, plainbits):
+    plainbits = AESPad(plainbits)
     iv = Random.new().read(AES.block_size)
     cipher = AES.new(key, AES.MODE_CBC, iv)
     return iv + cipher.encrypt(plainbits)
@@ -56,7 +71,14 @@ def AESEncrypt(key, plainbits):
 def AESDecrypt(key, cipherbits):
     iv = cipherbits[:AES.block_size]
     cipher = AES.new(key, AES.MODE_CBC, iv)
-    return cipher.decrypt(cipherbits[AES.block_size:])
+    plainbits = cipher.decrypt(cipherbits[AES.block_size:])
+    return AESUnpad(plainbits)
+
+def to_bytes(n, length, endianess='big'):
+    h = '%x' % n
+    s = ('0'*(len(h) % 2) + h).zfill(length*2)
+    res = bytes.fromhex(s).decode('utf-8')
+    return res if endianess == 'big' else res[::-1]
 
 @unique
 class State(Enum):
@@ -91,6 +113,7 @@ class Client(object):
         self._short_browser_desc = kwargs.get('short_browser_desc', 'Whatsapp Client')
         self._browser_desc = [self._long_browser_desc, self._short_browser_desc]
 
+        self._nb_msg_sent = 0
         self._received_msgs = {}
         self._ws = websocket.WebSocketApp(Client.whatsapp_wss_url,
             on_message = lambda ws, msg: self.__on_message(ws, msg),
@@ -278,9 +301,19 @@ class Client(object):
             messageTag = self.wait_one_msg()
             msg = self._received_msgs.pop(messageTag)
             data = self.decrypt_msg(msg)
-            print('=====')
             print('{} : {}'.format(messageTag, data))
-            print('=====')
+
+    def send_text_message(self, number, text):
+        # in work
+        messageId = "3EB0" + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
+
+        messageParams = {"key": {"fromMe": True, "remoteJid": number + "@s.whatsapp.net", "id": messageId},"messageTimestamp": getTimestamp(), "status": 1, "message": {"conversation": text}}
+        msgData = ["action", {"type": "relay", "epoch": str(self.messageSentCount)},[["message", None, WebMessage.encode(messageParams)]]]
+        encryptedMessage = self.encrypt_msg(write_binary(msgData))
+        payload = b'\x10\x80' + encryptedMessage
+
+        self.__send(messageId, payload)
+        self._nb_msg_sent += 1
 
     def load_session(self, session_path):
         f = open(session_path, 'r')
@@ -323,6 +356,8 @@ class Client(object):
         msg = messageTag + ','
         if type(payload) in (dict, list):
             msg += json.dumps(payload)
+        elif type(payload) is bytes:
+            msg = msg.encode() + payload
         else:
             msg += payload
         if self._enable_trace:
@@ -396,6 +431,10 @@ class Client(object):
         binary_data = AESDecrypt(self._encKey, cipherbits[32:])
         data = read_binary(binary_data)
         return data
+
+    def encrypt_msg(self, msg):
+        enc = AESEncrypt(self._encKey, msg)
+        return HmacSha256(self._macKey, enc) + enc; 
 
     def __on_error(self, ws, err):
         print(err)
