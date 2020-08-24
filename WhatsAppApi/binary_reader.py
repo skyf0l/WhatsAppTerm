@@ -1,27 +1,9 @@
-from .defines import Tags, ByteTokens
-from .whatsapp_protobuf_pb2 import WebMessageInfo
-
-import json
-from google.protobuf import json_format
+from .defines import Tags, ByteTokens, WebMessage
 
 """
 inspired by
-    https://github.com/sigalor/whatsapp-web-reveng/blob/master/backend/whatsapp_defines.py
     https://github.com/sigalor/whatsapp-web-reveng/blob/master/backend/whatsapp_binary_reader.py
 """
-
-class WebMessage:
-
-    @staticmethod
-    def decode(data):
-        msg = WebMessageInfo()
-        msg.ParseFromString(data)
-        return json.loads(json_format.MessageToJson(msg))
-
-    @staticmethod
-    def encode(msg):
-        data = json_format.Parse(json.dumps(msg), WebMessageInfo(), ignore_unknown_fields=True)
-        return data.SerializeToString()
 
 class BinaryReader(object):
 
@@ -144,6 +126,12 @@ class BinaryReader(object):
         else:
             raise ValueError('invalid string with tag ' + str(tag))
 
+    def read_string_from_chars(self, length):
+        self.check_can_read(length);
+        string = self._binary_data[self._byte_id:self._byte_id + length];
+        self._byte_id += length;
+        return string;
+
     def get_token(self, index):
         if index < 3 or index >= len(ByteTokens):
             raise ValueError('invalid token index: {}'.format(index))
@@ -161,7 +149,7 @@ class BinaryReader(object):
             attrs[index] = self.read_string(self.read_byte())
         return attrs
 
-    def read(self):
+    def read_node(self):
         list_size = self.read_list_size(self.read_byte())
         tag_desc = self.read_byte()
         desc = self.read_string(tag_desc)
@@ -185,10 +173,10 @@ class BinaryReader(object):
     def read_list(self, tag):
         content = []
         for _ in range(self.read_list_size(tag)):
-            content.append(self.read())
+            content.append(self.read_node())
         return content
 
-def whatsapp_read_msg_array(content):
+def read_msg_array(content):
     if not isinstance(content, list):
         return content
     msg = []
@@ -200,10 +188,7 @@ def whatsapp_read_msg_array(content):
     return msg
 
 def read_binary(binary_data, withMessages=False):
-    msg = BinaryReader(binary_data).read()
+    msg = BinaryReader(binary_data).read_node()
     if withMessages and msg is not None and isinstance(msg, list) and msg[1] is not None:
-        msg[2] = whatsapp_read_msg_array(msg[2])
+        msg[2] = read_msg_array(msg[2])
     return msg
-
-def write_binary(msg):
-    return None
