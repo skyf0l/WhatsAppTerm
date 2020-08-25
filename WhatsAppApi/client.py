@@ -24,6 +24,8 @@ from .binary_writer import write_binary
 from .security import Aes, Hmac
 from .security import get_enc_mac_keys
 
+from .session import load_session, save_session
+
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
     mustend = time.time() + timeout
     while time.time() < mustend:
@@ -61,7 +63,8 @@ class Client(object):
         debug=False, enable_trace=False, trace_truncate=1000,
         timeout=10,
         restore_sessions=False,
-        **kwargs):
+        on_open=None, on_close=None,
+        long_browser_desc='Python Whatsapp Client', short_browser_desc='Whatsapp Client'):
 
         self._debug = debug
         self._enable_trace = enable_trace
@@ -71,11 +74,11 @@ class Client(object):
         self._timeout = timeout
         self._restore_sessions = restore_sessions
 
-        self._on_open = kwargs.get('on_open')
-        self._on_close = kwargs.get('on_close')
+        self._on_open = on_open
+        self._on_close = on_close
 
-        self._long_browser_desc = kwargs.get('long_browser_desc', 'Python Whatsapp Client')
-        self._short_browser_desc = kwargs.get('short_browser_desc', 'Whatsapp Client')
+        self._long_browser_desc = long_browser_desc
+        self._short_browser_desc = short_browser_desc
         self._browser_desc = [self._long_browser_desc, self._short_browser_desc]
 
         self._nb_msg_sent = 0
@@ -147,14 +150,14 @@ class Client(object):
         return True
 
     def restore_session(self):
-        session_data = self.load_session(Client.default_save_session_path)
+        session_data = load_session(Client.default_save_session_path)
         if session_data is None:
             raise ValueError('Invalid session data')
         self._clientId = session_data['clientId']
         self._clientToken = session_data['clientToken']
         self._serverToken = session_data['serverToken']
-        self._encKey = b64decode(session_data['encKey'])
-        self._macKey = b64decode(session_data['macKey'])
+        self._encKey = session_data['encKey']
+        self._macKey = session_data['macKey']
 
         self._aes = Aes(self._encKey)
         self._hmac = Hmac(self._macKey)
@@ -186,7 +189,9 @@ class Client(object):
             raise TimeoutError('Query timed out')
 
         if self._restore_sessions:
-            self.save_session(Client.default_save_session_path)
+            save_session(self, Client.default_save_session_path)
+            if self._debug:
+                print('Session saved')
         if self._debug:
             print('Session restored')
 
@@ -196,7 +201,7 @@ class Client(object):
             raise Exception('Challenge expected')
 
         challenge = b64decode(cmd_result['challenge'])
-        signed_challenge = Hash(challenge).hash(self._macKey)
+        signed_challenge = Hmac(challenge).hash(self._macKey)
         result = challenge + signed_challenge
 
         challenge_query_name = 'challenge'
@@ -237,7 +242,9 @@ class Client(object):
         self.generate_keys()
 
         if self._restore_sessions:
-            self.save_session(Client.default_save_session_path)
+            save_session(self, Client.default_save_session_path)
+            if self._debug:
+                print('Session saved')
         self._qrcode['must_scan'] = False
 
         self.post_login()
@@ -270,35 +277,6 @@ class Client(object):
 
         self.__send(messageId, payload)
         self._nb_msg_sent += 1
-
-    def load_session(self, session_path):
-        f = open(session_path, 'r')
-        data = f.read()
-        f.close()
-        try:
-            session_data = json.loads(data)
-        except:
-            return None
-
-        if 'clientId' not in session_data or 'serverToken' not in session_data or 'clientToken' not in session_data or 'encKey' not in session_data or 'macKey' not in session_data:
-            return None
-        if self._debug:
-            print('Session loaded')
-        return(session_data)
-
-    def save_session(self, session_path):
-        session_data = {
-            'clientId': self._clientId,
-            'clientToken': self._clientToken,
-            'serverToken': self._serverToken,
-            'encKey': str(b64encode(self._encKey), 'utf8'),
-            'macKey': str(b64encode(self._macKey), 'utf8')}
-        session_data_dump = json.dumps(session_data)
-        f = open(session_path, 'w')
-        f.write(session_data_dump)
-        f.close()
-        if self._debug:
-            print('Session saved')
 
     # close session -> must to rescan the qrcode
     def logout(self):
