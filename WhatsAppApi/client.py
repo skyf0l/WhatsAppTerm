@@ -12,12 +12,6 @@ import os
 import binascii
 from base64 import b64encode, b64decode
 
-import hashlib
-from hkdf import hkdf_expand
-
-from Crypto import Random
-from Crypto.Cipher import AES
-
 import curve25519
 from .qrcode import render_qrcode, gen_qrcode
 
@@ -27,7 +21,8 @@ from .defines import WebMessage, Metrics
 from .binary_reader import read_binary
 from .binary_writer import write_binary
 
-from .security import Hmac
+from .security import Aes, Hmac
+from .security import get_enc_mac_keys
 
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
     mustend = time.time() + timeout
@@ -49,31 +44,6 @@ def get_whatsappweb_version():
 
 def getTimestamp():
     return int(time.time());
-
-def AESPad(s):
-    bs = AES.block_size
-    return s + (bs - len(s) % bs) * chr(bs - len(s) % bs).encode('utf8')
-
-def AESUnpad(s):
-    return s[:-ord(s[len(s)-1:])];
-
-def AESEncrypt(key, plainbits):
-    plainbits = AESPad(plainbits)
-    iv = Random.new().read(AES.block_size)
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    return iv + cipher.encrypt(plainbits)
-
-def AESDecrypt(key, cipherbits):
-    iv = cipherbits[:AES.block_size]
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    plainbits = cipher.decrypt(cipherbits[AES.block_size:])
-    return AESUnpad(plainbits)
-
-def to_bytes(n, length, endianess='big'):
-    h = '%x' % n
-    s = ('0'*(len(h) % 2) + h).zfill(length*2)
-    res = bytes.fromhex(s).decode('utf-8')
-    return res if endianess == 'big' else res[::-1]
 
 @unique
 class State(Enum):
@@ -185,6 +155,8 @@ class Client(object):
         self._serverToken = session_data['serverToken']
         self._encKey = b64decode(session_data['encKey'])
         self._macKey = b64decode(session_data['macKey'])
+
+        self._aes = Aes(self._encKey)
         self._hmac = Hmac(self._macKey)
 
         restore_query_name = 'restore_query'
@@ -272,22 +244,10 @@ class Client(object):
         return True
 
     def generate_keys(self):
-        secret = b64decode(self._conn['secret'])
-        if len(secret) != 144:
-            raise ValueError('Invalid secret')
+        self._encKey, self._macKey = get_enc_mac_keys(self._conn['secret'], self._privateKey)
 
-        sharedSecret = self._privateKey.get_shared_key(curve25519.Public(secret[:32]), lambda a:a)
-
-        key_material = Hmac(b'\0' * 32).hash(sharedSecret)
-        sharedSecretExpanded = hkdf_expand(key_material, length=80, hash=hashlib.sha256)
-        if Hmac(sharedSecretExpanded[32:64]).hash(secret[:32] + secret[64:]) != secret[32:64]:
-            raise ValueError('Hmac validation failed')
-
-        keysEncrypted = sharedSecretExpanded[64:] + secret[64:]
-        keysDecrypted = AESDecrypt(sharedSecretExpanded[:32], keysEncrypted)
-
-        self._encKey = keysDecrypted[:32]
-        self._macKey = keysDecrypted[32:64]
+        self._aes = Aes(self._encKey)
+        self._hmac = Hmac(self._macKey)
 
         if self._debug:
             print('Keys generated')
@@ -424,12 +384,12 @@ class Client(object):
         cipherbits = msg['data']
         if self._hmac.is_valid(cipherbits) != True:
             return None
-        binary_data = AESDecrypt(self._encKey, cipherbits[32:])
+        binary_data = self._aes.decrypt(cipherbits[32:])
         data = read_binary(binary_data)
         return data
 
     def encrypt_msg(self, msg):
-        enc = AESEncrypt(self._encKey, msg)
+        enc = self._aes.encrypt(msg)
         return self._hmac.hash(enc) + enc; 
 
     def __on_error(self, ws, err):
