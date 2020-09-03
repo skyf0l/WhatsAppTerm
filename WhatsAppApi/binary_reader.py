@@ -38,10 +38,10 @@ class BinaryReader(object):
     def read_int16(self):
         return self.read_intN(2)
 
-    def readInt20(self):
-        byte_1 = ord(self.read_byte())
-        byte_2 = ord(self.read_byte())
-        byte_3 = ord(self.read_byte())
+    def read_int20(self):
+        byte_1 = self.read_byte()
+        byte_2 = self.read_byte()
+        byte_3 = self.read_byte()
         value = ((byte_1 & 15) << 16) + (byte_2 << 8) + byte_3
         return value
 
