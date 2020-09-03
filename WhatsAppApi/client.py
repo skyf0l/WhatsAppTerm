@@ -55,9 +55,14 @@ class State(Enum):
 
 class Client(object):
 
+    # constants
     whatsapp_wss_url = 'wss://web.whatsapp.com/ws'
     origin_url = 'https://web.whatsapp.com'
     default_save_session_path = 'default.session'
+
+    # vars
+    _nb_msg_sent = 0
+    _received_msgs = {}
 
     def __init__(self,
         debug=False, enable_trace=False, trace_truncate=1000,
@@ -81,8 +86,6 @@ class Client(object):
         self._short_browser_desc = short_browser_desc
         self._browser_desc = [self._long_browser_desc, self._short_browser_desc]
 
-        self._nb_msg_sent = 0
-        self._received_msgs = {}
         self._ws = websocket.WebSocketApp(Client.whatsapp_wss_url,
             on_message = lambda ws, msg: self.__on_message(ws, msg),
             on_error = lambda ws, err: self.__on_error(ws, err),
@@ -201,11 +204,10 @@ class Client(object):
             raise Exception('Challenge expected')
 
         challenge = b64decode(cmd_result['challenge'])
-        signed_challenge = Hmac(challenge).hash(self._macKey)
-        result = challenge + signed_challenge
+        signed_challenge = self._hmac.hash(challenge)
 
         challenge_query_name = 'challenge'
-        challenge_query_json = ['admin', 'challenge', str(b64encode(result), 'utf8'), self._serverToken, self._clientId]
+        challenge_query_json = ['admin', 'challenge', str(b64encode(signed_challenge), 'utf8'), self._serverToken, self._clientId]
         self.__send(challenge_query_name, challenge_query_json)
         challenge_result = self.wait_query_pop_json(challenge_query_name)
 
@@ -216,7 +218,7 @@ class Client(object):
         self._qrcode['id'] += 1
 
         new_qrcode_query_name = '{}.{}'.format('new_qrcode_query', '--{}'.format(self._qrcode['id']))
-        new_qrcode_query_json = ["admin","Conn","reref"]
+        new_qrcode_query_json = ['admin', 'Conn', 'reref']
         self.__send(new_qrcode_query_name, new_qrcode_query_json)
         new_qrcode_result = self.wait_query_pop_json(new_qrcode_query_name)
 
@@ -268,10 +270,10 @@ class Client(object):
 
     def send_text_message(self, number, text):
         # in work
-        messageId = "3EB0" + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
+        messageId = '3EB0' + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
 
-        messageParams = {"key": {"fromMe": True, "remoteJid": number + "@s.whatsapp.net", "id": messageId},"messageTimestamp": getTimestamp(), "status": 1, "message": {"conversation": text}}
-        msgData = ["action", {"type": "relay", "epoch": str(self.messageSentCount)},[["message", None, WebMessage.encode(messageParams)]]]
+        messageParams = {'key': {'fromMe': True, 'remoteJid': number + '@s.whatsapp.net', 'id': messageId},'messageTimestamp': getTimestamp(), 'status': 1, 'message': {'conversation': text}}
+        msgData = ['action', {'type': 'relay', 'epoch': str(self.messageSentCount)},[['message', None, WebMessage.encode(messageParams)]]]
         encryptedMessage = self.encrypt_msg(write_binary(msgData))
         payload = b'\x10\x80' + encryptedMessage
 
@@ -281,7 +283,7 @@ class Client(object):
     # close session -> must to rescan the qrcode
     def logout(self):
         loggout_query_name = 'goodbye'
-        loggout_query_json = ["admin","Conn","disconnect"]
+        loggout_query_json = ['admin','Conn','disconnect']
         self.__send(loggout_query_name + ',', loggout_query_json)
         self.wait_query(loggout_query_name)
         self._ws.close()
@@ -376,7 +378,7 @@ class Client(object):
     def __on_close(self, ws):
         self._state = State.CLOSED
         if self._debug:
-            print("Websocket disconnected")
+            print('Websocket disconnected')
         self.callback(self._on_close)
 
     def __on_open(self, ws):
@@ -391,7 +393,7 @@ class Client(object):
                 callback(self, *args)
             except Exception as e:
                 if self._debug:
-                    print("error from callback {}: {}".format(callback, e))
+                    print('error from callback {}: {}'.format(callback, e))
 
     def must_scan_qrcode(self):
         return self._qrcode['must_scan']
