@@ -31,7 +31,7 @@ class BinaryReader(object):
         self.check_can_read(n)
         value = 0
         for k in range(n):
-            value += ord(self._binary_data[self._byte_id + k]) << (8 * (n - 1 - k))
+            value += self._binary_data[self._byte_id + k] << (8 * (n - 1 - k))
         self._byte_id += n
         return value
 
@@ -92,7 +92,7 @@ class BinaryReader(object):
         elif tag == Tags.LIST_8:
             return self.read_byte()
         elif tag == Tags.LIST_16:
-            return self.readInt16()
+            return self.read_int16()
         raise ValueError('invalid tag for list size: {}'.format(tag))
 
     def is_list_tag(self, tag):
