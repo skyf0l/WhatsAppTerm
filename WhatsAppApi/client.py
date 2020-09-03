@@ -60,12 +60,49 @@ class Client(object):
     origin_url = 'https://web.whatsapp.com'
     default_save_session_path = 'default.session'
 
-    # vars
+    # msgs
     _nb_msg_sent = 0
     _received_msgs = {}
 
+    # chats
+    _frequent_contacts = {}
+    '''
+    [
+        {
+            'jid': '33600000000@c.us',
+            'type': 'message'/'image'/'video'
+        },
+        ...
+    ]
+    '''
+    _chats = {}
+    '''
+    {
+        '33600000000@c.us': {
+            'status': 'unavailable'/available'/'composing',
+            'status_at': 1599135032,
+            'messages': [
+                {
+                    'id': HEX,
+                    'fromMe': True/False,
+                    'text': 'A random msg',
+                    'ack': MessageStatus
+                },
+                ...
+            ]
+        }
+    }
+    '''
+
+    # other
+    _battery = {
+        'value': 100,
+        'live': False,
+        'powersave': False
+    }
+
     def __init__(self,
-        debug=False, enable_trace=False, trace_truncate=100,
+        debug=False, enable_trace=False, trace_truncate=1000,
         timeout=10,
         restore_sessions=False,
         on_open=None, on_close=None,
@@ -150,6 +187,9 @@ class Client(object):
 
         self._clientToken = self._conn['clientToken']
         self._serverToken = self._conn['serverToken']
+
+        self._battery['value'] = self._conn['battery']
+        self._battery['live'] = self._conn['plugged']
         return True
 
     def restore_session(self):
@@ -262,7 +302,27 @@ class Client(object):
             print('Keys generated')
 
     def post_login(self):
-        pass
+        #time.sleep(5)
+        print("===========")
+        #print(str(self._received_msgs).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))
+
+    def set_battery(self, battery):
+        self._battery['value'] = battery['value']
+        self._battery['live'] = battery['live'] == 'true'
+        self._battery['powersave'] = battery['powersave'] == 'true'
+
+    def action(self, action):
+        print('=>ACTION')
+        print(action)
+        if len(action) != 3:
+            return False
+        if action[1] == None:
+            print()
+            if action[2][0][0] == 'battery':
+                battery = action[2][0][1]
+                set_battery(battery)
+                return True
+        return False
 
     def send_text_message(self, number, text):
         # in work
@@ -361,7 +421,11 @@ class Client(object):
             else:
                 print('Recv: {},{}'.format(messageTag, json_msg[0:self._trace_truncate] + '...'))
 
-        self._received_msgs[messageTag] = msg_data
+        if type(msg_data['json']) is list and len(msg_data['json']) >= 1 and msg_data['json'][0] == 'action':
+            if not self.action(msg_data['json']):
+               self._received_msgs[messageTag] = msg_data 
+        else:
+            self._received_msgs[messageTag] = msg_data
 
     def decrypt_msg(self, data):
         if self._hmac.is_valid(data) != True:
