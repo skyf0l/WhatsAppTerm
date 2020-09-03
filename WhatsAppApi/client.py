@@ -65,7 +65,7 @@ class Client(object):
     _received_msgs = {}
 
     def __init__(self,
-        debug=False, enable_trace=False, trace_truncate=1000,
+        debug=False, enable_trace=False, trace_truncate=100,
         timeout=10,
         restore_sessions=False,
         on_open=None, on_close=None,
@@ -85,7 +85,7 @@ class Client(object):
         self._long_browser_desc = long_browser_desc
         self._short_browser_desc = short_browser_desc
         self._browser_desc = [self._long_browser_desc, self._short_browser_desc]
-
+        import ssl
         self._ws = websocket.WebSocketApp(Client.whatsapp_wss_url,
             on_message = lambda ws, msg: self.__on_message(ws, msg),
             on_error = lambda ws, err: self.__on_error(ws, err),
@@ -262,11 +262,7 @@ class Client(object):
             print('Keys generated')
 
     def post_login(self):
-        while True:
-            messageTag = self.wait_one_msg()
-            msg = self._received_msgs.pop(messageTag)
-            data = self.decrypt_msg(msg)
-            print('{} : {}'.format(messageTag, data))
+        pass
 
     def send_text_message(self, number, text):
         # in work
@@ -296,6 +292,7 @@ class Client(object):
             msg = msg.encode() + payload
         else:
             msg += payload
+
         if self._enable_trace:
             if len(msg) > self._trace_truncate:
                 print('Send: {}'.format(msg[0:self._trace_truncate] + '...'))
@@ -343,29 +340,34 @@ class Client(object):
         return next(iter(self._received_msgs))
 
     def __on_message(self, ws, msg):
-        if self._enable_trace:
-            if len(msg) > self._trace_truncate:
-                print('Recv: {}'.format(msg[0:self._trace_truncate] + '...'))
-            else:
-                print('Recv: {}'.format(msg))
-
         if isinstance(msg, bytes):
             messageTag = str(msg.split(b',')[0], 'utf8')
             msg_data = {'data': msg[len(messageTag) + 1:]}
+            msg_data['json'] = self.decrypt_msg(msg_data['data'])
+            msg_data['data'] = 'OK'
         else:
             messageTag = msg.split(',')[0]
             msg_data = {'data': msg[len(messageTag) + 1:]}
-            try: msg_data['json'] = json.loads(msg_data['data'])
-            except ValueError: pass
+            try:
+                msg_data['json'] = json.loads(msg_data['data'])
+                msg_data['data'] = 'OK'
+            except ValueError:
+                pass
+
+        if self._enable_trace:
+            json_msg = str(msg_data['json'])
+            if len(json_msg) <= self._trace_truncate or self._trace_truncate <= 0:
+                print('Recv: {},{}'.format(messageTag, json_msg))
+            else:
+                print('Recv: {},{}'.format(messageTag, json_msg[0:self._trace_truncate] + '...'))
 
         self._received_msgs[messageTag] = msg_data
 
-    def decrypt_msg(self, msg):
-        cipherbits = msg['data']
-        if self._hmac.is_valid(cipherbits) != True:
+    def decrypt_msg(self, data):
+        if self._hmac.is_valid(data) != True:
             return None
-        binary_data = self._aes.decrypt(cipherbits[32:])
-        data = read_binary(binary_data)
+        binary_data = self._aes.decrypt(data[32:])
+        data = read_binary(binary_data, withMessages=True)
         return data
 
     def encrypt_msg(self, msg):
