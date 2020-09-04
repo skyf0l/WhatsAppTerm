@@ -124,3 +124,19 @@ class MessageStatus:
     DeliveryAck = 3
     Read        = 4
     Played      = 5
+
+    def get(status):
+        if status == 'Error' or status == 'ERROR' or status == 0:
+            return 0
+        elif status == 'Pending' or status == 'PENDING' or status == 1:
+            return 1
+        elif status == 'ServerAck' or status == 'SERVER_ACK' or status == 2:
+            return 2
+        elif status == 'DeliveryAck' or status == 'DELIVERY_ACK' or status == 3:
+            return 3
+        elif status == 'Read' or status == 'READ' or status == 4:
+            return 4
+        elif status == 'Played' or status == 'PLAYED' or status == 5:
+            return 5
+        else:
+            raise ValueError('Status {} unexist'.format(status))
