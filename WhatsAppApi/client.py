@@ -18,6 +18,7 @@ from .qrcode import render_qrcode, gen_qrcode
 from enum import Enum, unique
 
 from .defines import WebMessage, Metrics
+from .defines import MessageStatus
 from .binary_reader import read_binary
 from .binary_writer import write_binary
 
@@ -65,7 +66,7 @@ class Client(object):
     _received_msgs = {}
 
     # chats
-    _frequent_contacts = {}
+    _frequent_contacts = []
     '''
     [
         {
@@ -85,8 +86,9 @@ class Client(object):
                 {
                     'id': HEX,
                     'fromMe': True/False,
+                    'at': timestamp
                     'text': 'A random msg',
-                    'ack': MessageStatus
+                    'status': MessageStatus
                 },
                 ...
             ]
@@ -107,6 +109,7 @@ class Client(object):
         restore_sessions=False,
         on_open=None, on_close=None,
         long_browser_desc='Python Whatsapp Client', short_browser_desc='Whatsapp Client'):
+        #websocket.enableTrace(True)
 
         self._debug = debug
         self._enable_trace = enable_trace
@@ -302,26 +305,68 @@ class Client(object):
             print('Keys generated')
 
     def post_login(self):
-        #time.sleep(5)
-        print("===========")
-        #print(str(self._received_msgs).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))
+        pass
 
     def set_battery(self, battery):
         self._battery['value'] = battery['value']
         self._battery['live'] = battery['live'] == 'true'
         self._battery['powersave'] = battery['powersave'] == 'true'
 
+    def add_message(self, message):
+        remoteJid = message['key']['remoteJid']
+        if remoteJid not in self._chats:
+            self._chats[remoteJid] = {
+                'status': 'unknown',
+                'status_at': 0,
+                'messages': []
+            }
+
+        msg = {
+            'id': message['key']['id'],
+            'fromMe': message['key']['fromMe'],
+            'at': message['messageTimestamp'],
+            'text': '',
+            'status': MessageStatus.Error if 'status' not in message else MessageStatus.get(message['status'])
+        }
+        self._chats[remoteJid]['messages'].append(msg)
+
+    def add_messages(self, messages):
+        for message in messages:
+            self.add_message(message)
+
     def action(self, action):
-        print('=>ACTION')
-        print(action)
         if len(action) != 3:
             return False
         if action[1] == None:
-            print()
-            if action[2][0][0] == 'battery':
-                battery = action[2][0][1]
-                set_battery(battery)
+            content = action[2][0]
+            if content[0] == 'battery':
+                battery = content[1]
+                self.set_battery(battery)
                 return True
+            elif content[0] == 'contacts':
+                if 'type' in content[1] and content[1]['type'] == 'frequent':
+                    contacts = content[2]
+                    for contact in contacts:
+                        frequent_contact = {
+                            'jid': contact[1]['jid'],
+                            'type': contact[0]
+                        }
+                        self._frequent_contacts.append(frequent_contact)
+                    return True
+
+        elif 'add' in action[1]:
+            if action[1]['add'] == 'last':
+                messages = action[2]
+                self.add_messages(messages)
+                return True
+            elif action[1]['add'] == 'before':
+                if 'last' in action[1] and action[1]['last'] == 'true':
+                    messages = action[2]
+                    self.add_messages(messages)
+                    return True
+            elif action[1]['add'] == 'relay':
+                    return True
+
         return False
 
     def send_text_message(self, number, text):
@@ -423,8 +468,10 @@ class Client(object):
 
         if type(msg_data['json']) is list and len(msg_data['json']) >= 1 and msg_data['json'][0] == 'action':
             if not self.action(msg_data['json']):
-               self._received_msgs[messageTag] = msg_data 
+                print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+                self._received_msgs[messageTag] = msg_data 
         else:
+            print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
             self._received_msgs[messageTag] = msg_data
 
     def decrypt_msg(self, data):
