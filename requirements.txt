@@ -1,2 +1,6 @@
 websocket
+websocket-client
 curve25519-donna
+hkdf
+pyqrcode
+protobuf # for whatsapp_protobuf_pb2
