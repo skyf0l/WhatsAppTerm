@@ -1,15 +1,11 @@
 import websocket
 
-import re
-import requests
-
 import time
 import threading
 
 import json
 import os
 import sys
-import traceback
 
 import binascii
 from base64 import b64encode, b64decode
@@ -19,48 +15,14 @@ from .qrcode import render_qrcode, gen_qrcode
 
 from enum import Enum, unique
 
-from .defines import WebMessage, Metrics
-from .defines import MessageStatus, UserStatus
 from .binary_reader import read_binary
 from .binary_writer import write_binary
 
-from .security import Aes, Hmac
-from .security import get_enc_mac_keys
+from .defines import *
+from .utilities import *
+from .security import *
 
 from .session import load_session, save_session
-
-def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
-    mustend = time.time() + timeout
-    while time.time() < mustend:
-        if somepredicate(*args, **kwargs):
-            return True
-        time.sleep(period)
-    return False
-
-def get_whatsappweb_version():
-    url = 'https://web.whatsapp.com/'
-    headers = {'User-Agent':'Mozilla/75 Gecko/20100101 Firefox/76'}
-
-    result = requests.get(url, headers=headers)
-    m = re.search(r'l=\"([0-9]+)\.([0-9]+)\.([0-9]+)\"', result.text)
-    if m is None:
-        raise ValueError('Can\'t find WhatsAppWeb version')
-    return [int(m.group(1)), int(m.group(2)), int(m.group(3))]
-
-def getTimestamp():
-    return int(time.time());
-
-def eprint(msg):
-    print(msg, file=sys.stderr)
-
-def eprint_report(msg, add_traceback=False):
-    RED_COLOR = '\033[91m'
-    END_COLOR = '\033[0m'
-    report = msg + '\n'
-    if add_traceback == True:
-        report += traceback.format_exc()
-    report += 'Please, open an issue to fix it (hide private data)'
-    eprint(RED_COLOR + report + END_COLOR)
 
 @unique
 class State(Enum):
@@ -448,7 +410,7 @@ class Client(object):
         # in work
         messageId = '3EB0' + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
 
-        messageParams = {'key': {'fromMe': True, 'remoteJid': number + '@s.whatsapp.net', 'id': messageId},'messageTimestamp': getTimestamp(), 'status': 1, 'message': {'conversation': text}}
+        messageParams = {'key': {'fromMe': True, 'remoteJid': number + '@s.whatsapp.net', 'id': messageId},'messageTimestamp': get_timestamp(), 'status': 1, 'message': {'conversation': text}}
         msgData = ['action', {'type': 'relay', 'epoch': str(self.messageSentCount)},[['message', None, WebMessage.encode(messageParams)]]]
         encryptedMessage = self.encrypt_msg(write_binary(msgData))
         payload = b'\x10\x80' + encryptedMessage
