@@ -322,12 +322,12 @@ class Client(object):
                 else:
                     eprint_report('Unknown message type: {}'.format(message))
 
-            self._chats_messages[jid].append(msg)
+            self._chats_messages[jid].insert(0, msg)
         except Exception as e:
             eprint_report('Invalid chat message: {}'.format(message), add_traceback=True)
 
     def add_messages(self, messages):
-        for message in messages:
+        for message in messages[::-1]:
             self.add_message(message)
 
     def action(self, action):
