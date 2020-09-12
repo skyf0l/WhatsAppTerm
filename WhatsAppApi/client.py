@@ -57,6 +57,7 @@ class Client(object):
     _chats_loaded = False
     _chats = []
     '''
+    order by timestamp, in descending order
     [
         {
             'jid': '33600000000@c.us'
@@ -74,6 +75,7 @@ class Client(object):
     '''
     _chats_messages = {}
     '''
+    order by timestamp, in descending order
     {
         '33600000000@c.us': {
             'messages': [
@@ -334,13 +336,20 @@ class Client(object):
                 'fromMe': message['key']['fromMe'],
                 'at': message['messageTimestamp'],
                 'message': {
-                    'type': MessageType.get(list(message['message'].keys())[0]) if 'message' in message else MessageType.NoMessage
+                    'type': MessageType.get(list(message['message'].keys())[0]) if 'message' in message else MessageType.NoMessage,
+                    'content': None
                 },
                 'participant' : message['participant'] if 'participant' in message else None,
                 'message_stub' : MessageStubType.get(message['messageStubType']) if 'messageStubType' in message else MessageStubType.Unknown,
                 'message_stub_parameters' : message['messageStubParameters'] if 'messageStubParameters' in message else None,
                 'status': MessageStatus.Error if 'status' not in message else MessageStatus.get(message['status'])
             }
+
+            if msg['message']['type'] != MessageType.NoMessage:
+                message_content = message['message'][list(message['message'].keys())[0]]
+                if msg['message']['type'] == MessageType.Conversation:
+                    msg['message']['content'] = message_content
+
             self._chats_messages[jid].append(msg)
         except Exception as e:
             eprint_report('Invalid chat message: {}'.format(message), add_traceback=True)

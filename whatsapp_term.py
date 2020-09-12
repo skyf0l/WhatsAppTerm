@@ -17,7 +17,7 @@ for chat in chats:
 
 time.sleep(5)
 
-messages = client.get_messages('33766724724@c.us')
+messages = client.get_messages(chats[0]['jid'])
 
 print(messages)
 
