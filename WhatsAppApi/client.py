@@ -45,52 +45,9 @@ class Client(object):
     # chats
     _frequent_contacts_loaded = False
     _frequent_contacts = []
-    '''
-    [
-        {
-            'jid': '33600000000@c.us',
-            'type': 'message'/'image'/'video'
-        },
-        ...
-    ]
-    '''
     _chats_loaded = False
     _chats = []
-    '''
-    order by timestamp, in descending order
-    [
-        {
-            'jid': '33600000000@c.us'
-            'count': 0, # msg not read
-            'name': 'name',
-            't': timestamp
-            'mute': timestamp # end mute
-            'modify_tag': int
-            'spam': True/False
-            'status': 'unavailable'/available'/'composing',
-            'status_at': 1599135032
-        },
-        ...
-    ]
-    '''
     _chats_messages = {}
-    '''
-    order by timestamp, in descending order
-    {
-        '33600000000@c.us': {
-            'messages': [
-                {
-                    'id': HEX,
-                    'fromMe': True/False,
-                    'at': timestamp
-                    'text': 'A random msg',
-                    'status': MessageStatus
-                },
-                ...
-            ]
-        }
-    }
-    '''
 
     # other
     _battery = {
@@ -333,7 +290,7 @@ class Client(object):
 
             msg = {
                 'id': message['key']['id'],
-                'fromMe': message['key']['fromMe'],
+                'from_me': message['key']['fromMe'],
                 'at': message['messageTimestamp'],
                 'message': {
                     'type': MessageType.get(list(message['message'].keys())[0]) if 'message' in message else MessageType.NoMessage,
