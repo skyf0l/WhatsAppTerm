@@ -8,6 +8,8 @@ import threading
 
 import json
 import os
+import sys
+import traceback
 
 import binascii
 from base64 import b64encode, b64decode
@@ -18,7 +20,7 @@ from .qrcode import render_qrcode, gen_qrcode
 from enum import Enum, unique
 
 from .defines import WebMessage, Metrics
-from .defines import MessageStatus
+from .defines import MessageStatus, UserStatus
 from .binary_reader import read_binary
 from .binary_writer import write_binary
 
@@ -48,6 +50,18 @@ def get_whatsappweb_version():
 def getTimestamp():
     return int(time.time());
 
+def eprint(msg):
+    print(msg, file=sys.stderr)
+
+def eprint_report(msg, add_traceback=False):
+    RED_COLOR = '\033[91m'
+    END_COLOR = '\033[0m'
+    report = msg + '\n'
+    if add_traceback == True:
+        report += traceback.format_exc()
+    report += 'Please, open an issue to fix it (hide private data)'
+    eprint(RED_COLOR + report + END_COLOR)
+
 @unique
 class State(Enum):
     OPENING = 0
@@ -66,6 +80,7 @@ class Client(object):
     _received_msgs = {}
 
     # chats
+    _frequent_contacts_loaded = False
     _frequent_contacts = []
     '''
     [
@@ -76,12 +91,28 @@ class Client(object):
         ...
     ]
     '''
-    _chats = {}
+    _chats_loaded = False
+    _chats = []
+    '''
+    [
+        {
+            'jid': '33600000000@c.us'
+            'count': 0, # msg not read
+            'name': 'name',
+            't': timestamp
+            'mute': timestamp # end mute
+            'modify_tag': int
+            'spam': True/False
+            'status': 'unavailable'/available'/'composing',
+            'status_at': 1599135032
+        },
+        ...
+    ]
+    '''
+    _chats_messages = {}
     '''
     {
         '33600000000@c.us': {
-            'status': 'unavailable'/available'/'composing',
-            'status_at': 1599135032,
             'messages': [
                 {
                     'id': HEX,
@@ -104,7 +135,7 @@ class Client(object):
     }
 
     def __init__(self,
-        debug=False, enable_trace=False, trace_truncate=1000,
+        debug=False, enable_trace=False, trace_truncate=100,
         timeout=10,
         restore_sessions=False,
         on_open=None, on_close=None,
@@ -125,7 +156,7 @@ class Client(object):
         self._long_browser_desc = long_browser_desc
         self._short_browser_desc = short_browser_desc
         self._browser_desc = [self._long_browser_desc, self._short_browser_desc]
-        import ssl
+
         self._ws = websocket.WebSocketApp(Client.whatsapp_wss_url,
             on_message = lambda ws, msg: self.__on_message(ws, msg),
             on_error = lambda ws, err: self.__on_error(ws, err),
@@ -331,6 +362,7 @@ class Client(object):
         self._chats[remoteJid]['messages'].append(msg)
 
     def add_messages(self, messages):
+        return
         for message in messages:
             self.add_message(message)
 
@@ -367,6 +399,49 @@ class Client(object):
             elif action[1]['add'] == 'relay':
                     return True
 
+        return False
+
+    def is_in_chats(self, jid):
+        for chat in self._chats:
+            if chat['jid'] == jid:
+                return True
+        return False
+
+    def add_chat(self, chat):
+        try:
+            if not self.is_in_chats(chat['jid']):
+                new_chat = {
+                    'jid': chat['jid'],
+                    'not_read_count': chat['count'],
+                    'name': str(chat['name'], 'utf8') if 'name' in chat else None,
+                    't': int(chat['t']),
+                    'mute': int(chat['mute']),
+                    'modify_tag': chat['modify_tag'] if 'modify_tag' in chat else None,
+                    'spam': chat['spam'] == 'true' if 'spam' in chat else None,
+                    'status': UserStatus.Unknown,
+                    'status_at': 0
+                }
+                self._chats.append(new_chat)
+        except Exception as e:
+            eprint_report('Invalid chat data: {}'.format(chat), add_traceback=True)
+
+    def order_chats(self):
+        self._chats.sort(key=lambda chat: chat['t'], reverse=True)
+        
+    def add_chats(self, chats):
+        for chat in chats:
+            if len(chat) == 3 and chat[0] == 'chat' and chat[2] == None:
+                self.add_chat(chat[1])
+            else:
+                eprint_report('Unknown chat format: {}'.format(chat))
+        self.order_chats()
+        self._chats_loaded = True
+
+    def response(self, action):
+        if len(action) != 3:
+            return False
+        if 'type' in action[1] and action[1]['type'] == 'chat':
+            self.add_chats(action[2])
         return False
 
     def send_text_message(self, number, text):
@@ -466,12 +541,18 @@ class Client(object):
             else:
                 print('Recv: {},{}'.format(messageTag, json_msg[0:self._trace_truncate] + '...'))
 
-        if type(msg_data['json']) is list and len(msg_data['json']) >= 1 and msg_data['json'][0] == 'action':
-            if not self.action(msg_data['json']):
-                print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+        if type(msg_data['json']) is list and len(msg_data['json']) >= 1:
+            if msg_data['json'][0] == 'action' and not self.action(msg_data['json']):
+                #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
                 self._received_msgs[messageTag] = msg_data 
+            if msg_data['json'][0] == 'response' and not self.response(msg_data['json']):
+                #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+                self._received_msgs[messageTag] = msg_data
+            else:
+                #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+                self._received_msgs[messageTag] = msg_data
         else:
-            print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+            #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
             self._received_msgs[messageTag] = msg_data
 
     def decrypt_msg(self, data):
@@ -513,6 +594,11 @@ class Client(object):
 
     def get_qrcode(self):
         return self._qrcode['qrcode']
+
+    def get_chats(self):
+        if wait_until(lambda self: self._chats_loaded == True, self._timeout, self=self) == False:
+            raise TimeoutError('Receive chats timed out')
+        return self._chats
                     
     def get_pushname(self):
         return self._conn['pushname']

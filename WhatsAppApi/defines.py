@@ -126,17 +126,33 @@ class MessageStatus:
     Played      = 5
 
     def get(status):
-        if status == 'Error' or status == 'ERROR' or status == 0:
-            return 0
-        elif status == 'Pending' or status == 'PENDING' or status == 1:
-            return 1
-        elif status == 'ServerAck' or status == 'SERVER_ACK' or status == 2:
-            return 2
-        elif status == 'DeliveryAck' or status == 'DELIVERY_ACK' or status == 3:
-            return 3
-        elif status == 'Read' or status == 'READ' or status == 4:
-            return 4
-        elif status == 'Played' or status == 'PLAYED' or status == 5:
-            return 5
+        if status == 'Error' or status == 'ERROR' or status == MessageStatus.Error:
+            return MessageStatus.Error
+        elif status == 'Pending' or status == 'PENDING' or status == MessageStatus.Pending:
+            return MessageStatus.Pending
+        elif status == 'ServerAck' or status == 'SERVER_ACK' or status == MessageStatus.ServerAck:
+            return MessageStatus.ServerAck
+        elif status == 'DeliveryAck' or status == 'DELIVERY_ACK' or status == MessageStatus.DeliveryAck:
+            return MessageStatus.DeliveryAck
+        elif status == 'Read' or status == 'READ' or status == MessageStatus.Read:
+            return MessageStatus.Read
+        elif status == 'Played' or status == 'PLAYED' or status == MessageStatus.Played:
+            return MessageStatus.Played
+        else:
+            raise ValueError('Status {} unexist'.format(status))
+
+class UserStatus:
+    Unknown     = 0
+    Unavailable = 1
+    Available   = 2
+    Composing   = 3
+
+    def get(status):
+        if status == 'unavailable' or status == UserStatus.Unavailable:
+            return UserStatus.Unavailable
+        elif status == 'Available' or status == UserStatus.Available:
+            return UserStatus.Available
+        elif status == 'Composing' or status == UserStatus.Composing:
+            return UserStatus.Composing
         else:
             raise ValueError('Status {} unexist'.format(status))
