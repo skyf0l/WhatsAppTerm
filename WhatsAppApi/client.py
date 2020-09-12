@@ -291,9 +291,10 @@ class Client(object):
             msg = {
                 'id': message['key']['id'],
                 'from_me': message['key']['fromMe'],
-                'at': message['messageTimestamp'],
+                'at': int(message['messageTimestamp']),
                 'message': {
                     'type': MessageType.get(list(message['message'].keys())[0]) if 'message' in message else MessageType.NoMessage,
+                    'text': None,
                     'content': None
                 },
                 'participant' : message['participant'] if 'participant' in message else None,
@@ -305,7 +306,21 @@ class Client(object):
             if msg['message']['type'] != MessageType.NoMessage:
                 message_content = message['message'][list(message['message'].keys())[0]]
                 if msg['message']['type'] == MessageType.Conversation:
-                    msg['message']['content'] = message_content
+                    msg['message']['text'] = message_content
+                elif msg['message']['type'] == MessageType.ExtendedTextMessage:
+                    msg['message']['text'] = message_content['text']
+                elif msg['message']['type'] == MessageType.ImageMessage:
+                    if 'caption' in message_content:
+                        msg['message']['text'] = message_content['caption']
+                elif msg['message']['type'] == MessageType.VideoMessage:
+                    if 'caption' in message_content:
+                        msg['message']['text'] = message_content['caption']
+                elif msg['message']['type'] == MessageType.AudioMessage:
+                    pass
+                elif msg['message']['type'] == MessageType.StickerMessage:
+                    pass
+                else:
+                    eprint_report('Unknown message type: {}'.format(message))
 
             self._chats_messages[jid].append(msg)
         except Exception as e:
