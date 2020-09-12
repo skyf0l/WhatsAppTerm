@@ -298,7 +298,18 @@ class Client(object):
             print('Keys generated')
 
     def post_login(self):
-        pass
+        self.run_presence_loop()
+
+    def presence_loop(self):
+        time.sleep(2)
+        while self._state == State.OPEN:
+            self.__send('?', ',')
+            time.sleep(30)
+
+    def run_presence_loop(self):
+        self._presence_thread = threading.Thread(target=self.presence_loop)
+        self._presence_thread.daemon = True
+        self._presence_thread.start()
 
     def set_battery(self, battery):
         self._battery['value'] = battery['value']
@@ -375,6 +386,7 @@ class Client(object):
                 new_chat = {
                     'jid': chat['jid'],
                     'not_read_count': chat['count'],
+                    'total_count': 0,
                     'name': str(chat['name'], 'utf8') if 'name' in chat else None,
                     't': int(chat['t']),
                     'mute': int(chat['mute']),
@@ -426,8 +438,8 @@ class Client(object):
         self.wait_query(loggout_query_name)
         self._ws.close()
 
-    def __send(self, messageTag, payload):
-        msg = messageTag + ','
+    def __send(self, message_tag, payload):
+        msg = message_tag + ','
         if type(payload) in (dict, list):
             msg += json.dumps(payload)
         elif type(payload) is bytes:
@@ -482,40 +494,47 @@ class Client(object):
         return next(iter(self._received_msgs))
 
     def __on_message(self, ws, msg):
-        if isinstance(msg, bytes):
-            messageTag = str(msg.split(b',')[0], 'utf8')
-            msg_data = {'data': msg[len(messageTag) + 1:]}
-            msg_data['json'] = self.decrypt_msg(msg_data['data'])
-            msg_data['data'] = 'OK'
-        else:
-            messageTag = msg.split(',')[0]
-            msg_data = {'data': msg[len(messageTag) + 1:]}
-            try:
-                msg_data['json'] = json.loads(msg_data['data'])
+        try:
+            if isinstance(msg, bytes):
+                message_tag = str(msg.split(b',')[0], 'utf8')
+                msg_data = {'data': msg[len(message_tag) + 1:]}
+                msg_data['json'] = self.decrypt_msg(msg_data['data'])
                 msg_data['data'] = 'OK'
-            except ValueError:
-                pass
-
-        if self._enable_trace:
-            json_msg = str(msg_data['json'])
-            if len(json_msg) <= self._trace_truncate or self._trace_truncate <= 0:
-                print('Recv: {},{}'.format(messageTag, json_msg))
             else:
-                print('Recv: {},{}'.format(messageTag, json_msg[0:self._trace_truncate] + '...'))
+                message_tag = msg.split(',')[0]
+                msg_data = {'data': msg[len(message_tag) + 1:]}
+                try:
+                    msg_data['json'] = json.loads(msg_data['data'])
+                    msg_data['data'] = 'OK'
+                except ValueError:
+                    pass
 
-        if type(msg_data['json']) is list and len(msg_data['json']) >= 1:
-            if msg_data['json'][0] == 'action' and not self.action(msg_data['json']):
-                #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
-                self._received_msgs[messageTag] = msg_data 
-            if msg_data['json'][0] == 'response' and not self.response(msg_data['json']):
-                #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
-                self._received_msgs[messageTag] = msg_data
+            if self._enable_trace:
+                trace_data_msg = str(msg_data['json'] if 'json' in msg_data else msg_data['data'])
+                if len(trace_data_msg) == 0:
+                    trace_msg = message_tag
+                elif len(trace_data_msg) <= self._trace_truncate:
+                    trace_msg = '{},{}'.format(message_tag, trace_data_msg)
+                else:
+                    trace_msg = '{},{}...'.format(message_tag, trace_data_msg[0:self._trace_truncate])
+                print('Recv: {}'.format(trace_msg))
+
+            if 'json' in msg_data and type(msg_data['json']) is list and len(msg_data['json']) >= 1:
+                if msg_data['json'][0] == 'action' and not self.action(msg_data['json']):
+                    #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+                    self._received_msgs[message_tag] = msg_data 
+                if msg_data['json'][0] == 'response' and not self.response(msg_data['json']):
+                    #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+                    self._received_msgs[message_tag] = msg_data
+                else:
+                    #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+                    self._received_msgs[message_tag] = msg_data
             else:
+                print_unknown_msg(message_tag, msg_data)
                 #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
-                self._received_msgs[messageTag] = msg_data
-        else:
-            #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
-            self._received_msgs[messageTag] = msg_data
+                self._received_msgs[message_tag] = msg_data
+        except Exception as e:
+            eprint_report('Invalid msg: {}'.format(msg), add_traceback=True)
 
     def decrypt_msg(self, data):
         if self._hmac.is_valid(data) != True:
