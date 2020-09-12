@@ -301,9 +301,9 @@ class Client(object):
         self.run_presence_loop()
 
     def presence_loop(self):
-        time.sleep(2)
+        time.sleep(15)
         while self._state == State.OPEN:
-            self.__send('?', ',')
+            self._ws.send('?,,')
             time.sleep(30)
 
     def run_presence_loop(self):
@@ -495,6 +495,11 @@ class Client(object):
 
     def __on_message(self, ws, msg):
         try:
+
+            if msg[0] == '!' and ',' not in msg:
+                # presential msg
+                return
+
             if isinstance(msg, bytes):
                 message_tag = str(msg.split(b',')[0], 'utf8')
                 msg_data = {'data': msg[len(message_tag) + 1:]}
@@ -531,7 +536,6 @@ class Client(object):
                     self._received_msgs[message_tag] = msg_data
             else:
                 print_unknown_msg(message_tag, msg_data)
-                #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
                 self._received_msgs[message_tag] = msg_data
         except Exception as e:
             eprint_report('Invalid msg: {}'.format(msg), add_traceback=True)
