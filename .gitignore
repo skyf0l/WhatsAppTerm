@@ -1,10 +1,6 @@
 # Save files
 *.session
 
-# Work files
-work*
-work/*
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
