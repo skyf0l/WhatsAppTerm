@@ -7,6 +7,8 @@ import re
 import requests
 
 def wait_until(somepredicate, timeout, period=0.05, *args, **kwargs):
+    if somepredicate(*args, **kwargs):
+        return True
     mustend = time.time() + timeout
     while time.time() < mustend:
         if somepredicate(*args, **kwargs):
