@@ -324,25 +324,28 @@ class Client(object):
         self._battery['powersave'] = battery['powersave'] == 'true'
 
     def add_message(self, message):
-        remoteJid = message['key']['remoteJid']
-        if remoteJid not in self._chats:
-            self._chats[remoteJid] = {
-                'status': 'unknown',
-                'status_at': 0,
-                'messages': []
-            }
+        try:
+            jid = message['key']['remoteJid'].replace('s.whatsapp.net', 'c.us')
+            if jid not in self._chats_messages:
+                self._chats_messages[jid] = []
 
-        msg = {
-            'id': message['key']['id'],
-            'fromMe': message['key']['fromMe'],
-            'at': message['messageTimestamp'],
-            'text': '',
-            'status': MessageStatus.Error if 'status' not in message else MessageStatus.get(message['status'])
-        }
-        self._chats[remoteJid]['messages'].append(msg)
+            msg = {
+                'id': message['key']['id'],
+                'fromMe': message['key']['fromMe'],
+                'at': message['messageTimestamp'],
+                'message': {
+                    'type': MessageType.get(list(message['message'].keys())[0]) if 'message' in message else MessageType.NoMessage
+                },
+                'participant' : message['participant'] if 'participant' in message else None,
+                'message_stub' : MessageStubType.get(message['messageStubType']) if 'messageStubType' in message else MessageStubType.Unknown,
+                'message_stub_parameters' : message['messageStubParameters'] if 'messageStubParameters' in message else None,
+                'status': MessageStatus.Error if 'status' not in message else MessageStatus.get(message['status'])
+            }
+            self._chats_messages[jid].append(msg)
+        except Exception as e:
+            eprint_report('Invalid chat message: {}'.format(message), add_traceback=True)
 
     def add_messages(self, messages):
-        return
         for message in messages:
             self.add_message(message)
 
@@ -375,7 +378,13 @@ class Client(object):
                     self.add_messages(messages)
                     return True
             elif action[1]['add'] == 'relay':
-                    return True
+                messages = action[2]
+                self.add_messages(messages)
+                return True
+            elif action[1]['add'] == 'update':
+                messages = action[2]
+                self.add_messages(messages)
+                return True
 
         return False
 
@@ -390,7 +399,7 @@ class Client(object):
             if not self.is_in_chats(chat['jid']):
                 new_chat = {
                     'jid': chat['jid'],
-                    'not_read_count': chat['count'],
+                    'not_read_count': int(chat['count']),
                     'total_count': 0,
                     'name': str(chat['name'], 'utf8') if 'name' in chat else None,
                     't': int(chat['t']),
@@ -431,7 +440,7 @@ class Client(object):
         messageId = '3EB0' + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
 
         messageParams = {'key': {'fromMe': True, 'remoteJid': number + '@s.whatsapp.net', 'id': messageId},'messageTimestamp': get_timestamp(), 'status': 1, 'message': {'conversation': text}}
-        msgData = ['action', {'type': 'relay', 'epoch': str(self.messageSentCount)},[['message', None, WebMessage.encode(messageParams)]]]
+        msgData = ['action', {'type': 'relay', 'epoch': str(self._nb_msg_sent)},[['message', None, WebMessage.encode(messageParams)]]]
         encryptedMessage = self.encrypt_msg(write_binary(msgData))
         payload = b'\x10\x80' + encryptedMessage
 
@@ -552,7 +561,7 @@ class Client(object):
                 print_unknown_msg(message_tag, msg_data)
                 self._received_msgs[message_tag] = msg_data
         except Exception as e:
-            eprint_report('Invalid msg: {}'.format(msg), add_traceback=True)
+            eprint_report('Invalid msg: {},({}){}'.format(message_tag, 'json' if 'json' in msg_data else 'data', msg_data['json'] if 'json' in msg_data else msg_data['data']), add_traceback=True)
 
     def decrypt_msg(self, data):
         if wait_until(lambda self: hasattr(self, '_hmac'), self._timeout, self=self) == False:
@@ -601,6 +610,11 @@ class Client(object):
         if wait_until(lambda self: self._chats_loaded == True, self._timeout, self=self) == False:
             raise TimeoutError('Receive chats timed out')
         return self._chats
+
+    def get_messages(self, jid):
+        if jid not in self._chats_messages:
+            return None
+        return self._chats_messages[jid]
                     
     def get_pushname(self):
         return self._conn['pushname']

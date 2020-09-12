@@ -13,7 +13,13 @@ while client.must_scan_qrcode():
 
 chats = client.get_chats()
 for chat in chats:
-	print(chat['name'] if chat['name'] is not None else chat['jid'])
+	print((chat['name'] + ' ' + chat['jid'] if chat['name'] is not None else chat['jid']) + (' ({})'.format(chat['not_read_count']) if chat['not_read_count'] > 0 else ''))
+
+time.sleep(5)
+
+messages = client.get_messages('33766724724@c.us')
+
+print(messages)
 
 while True:
     time.sleep(0.25)
