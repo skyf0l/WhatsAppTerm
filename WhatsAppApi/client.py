@@ -40,6 +40,7 @@ class Client(object):
     # msgs
     _nb_msg_sent = 0
     _received_msgs = {}
+    _expected_message_tags = []
 
     # chats
     _frequent_contacts_loaded = False
@@ -130,6 +131,8 @@ class Client(object):
         self._ws_thread.daemon = True
         self._ws_thread.start()
         
+        self._expected_message_tags = ['s1', 's2', 's3', 's4']
+
         if wait_until(lambda self: self._state == State.OPEN or self._state == State.CLOSED, self._timeout, self=self) == False:
             raise TimeoutError('Websocket timed out')
         if self._state == State.CLOSED:
@@ -142,6 +145,7 @@ class Client(object):
         self._whatsappweb_version = get_whatsappweb_version()
 
         connection_query_name = 'connection_query'
+        self._expected_message_tags.append(connection_query_name)
         connection_query_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, self._clientId, True]
         self.__send(connection_query_name, connection_query_json)
         connection_result = self.wait_query_pop_json(connection_query_name)
@@ -202,6 +206,7 @@ class Client(object):
         self._hmac = Hmac(self._macKey)
 
         restore_query_name = 'restore_query'
+        self._expected_message_tags.append(restore_query_name)
         restore_query_json = ['admin', 'login', self._clientToken, self._serverToken, self._clientId, 'takeover']
         self.__send(restore_query_name, restore_query_json)
 
@@ -243,6 +248,7 @@ class Client(object):
         signed_challenge = self._hmac.hash(challenge)
 
         challenge_query_name = 'challenge'
+        self._expected_message_tags.append(challenge_query_name)
         challenge_query_json = ['admin', 'challenge', str(b64encode(signed_challenge), 'utf8'), self._serverToken, self._clientId]
         self.__send(challenge_query_name, challenge_query_json)
         challenge_result = self.wait_query_pop_json(challenge_query_name)
@@ -254,6 +260,7 @@ class Client(object):
         self._qrcode['id'] += 1
 
         new_qrcode_query_name = '{}.{}'.format('new_qrcode_query', '--{}'.format(self._qrcode['id']))
+        self._expected_message_tags.append(new_qrcode_query_name)
         new_qrcode_query_json = ['admin', 'Conn', 'reref']
         self.__send(new_qrcode_query_name, new_qrcode_query_json)
         new_qrcode_result = self.wait_query_pop_json(new_qrcode_query_name)
@@ -340,8 +347,6 @@ class Client(object):
             self.add_message(message)
 
     def action(self, action):
-        if len(action) != 3:
-            return False
         if action[1] == None:
             content = action[2][0]
             if content[0] == 'battery':
@@ -412,10 +417,13 @@ class Client(object):
         self._chats_loaded = True
 
     def response(self, action):
-        if len(action) != 3:
-            return False
         if 'type' in action[1] and action[1]['type'] == 'chat':
             self.add_chats(action[2])
+            return True
+
+        if 'type' in action[1] and action[1]['type'] == 'contacts':
+            return True
+
         return False
 
     def send_text_message(self, number, text):
@@ -433,6 +441,7 @@ class Client(object):
     # close session -> must to rescan the qrcode
     def logout(self):
         loggout_query_name = 'goodbye'
+        self._expected_message_tags.append(loggout_query_name)
         loggout_query_json = ['admin','Conn','disconnect']
         self.__send(loggout_query_name + ',', loggout_query_json)
         self.wait_query(loggout_query_name)
@@ -524,15 +533,20 @@ class Client(object):
                     trace_msg = '{},{}...'.format(message_tag, trace_data_msg[0:self._trace_truncate])
                 print('Recv: {}'.format(trace_msg))
 
-            if 'json' in msg_data and type(msg_data['json']) is list and len(msg_data['json']) >= 1:
-                if msg_data['json'][0] == 'action' and not self.action(msg_data['json']):
-                    #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
-                    self._received_msgs[message_tag] = msg_data 
-                if msg_data['json'][0] == 'response' and not self.response(msg_data['json']):
-                    #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
-                    self._received_msgs[message_tag] = msg_data
+            if message_tag in self._expected_message_tags:
+                self._expected_message_tags.remove(message_tag)
+                self._received_msgs[message_tag] = msg_data
+                return
+
+            if 'json' in msg_data and type(msg_data['json']) is list and len(msg_data['json']) == 3:
+                if msg_data['json'][0] == 'action':
+                    if not self.action(msg_data['json']):
+                        print_unknown_msg(message_tag, msg_data)
+                elif msg_data['json'][0] == 'response':
+                    if not self.response(msg_data['json']):
+                        print_unknown_msg(message_tag, msg_data)
                 else:
-                    #print(str(msg_data['json']).replace('b\'', '\'').replace('b"', '"').replace('None', 'null').replace('True', 'true').replace('False', 'false'))        
+                    print_unknown_msg(message_tag, msg_data)
                     self._received_msgs[message_tag] = msg_data
             else:
                 print_unknown_msg(message_tag, msg_data)
@@ -541,6 +555,9 @@ class Client(object):
             eprint_report('Invalid msg: {}'.format(msg), add_traceback=True)
 
     def decrypt_msg(self, data):
+        if wait_until(lambda self: hasattr(self, '_hmac'), self._timeout, self=self) == False:
+            raise TimeoutError('Generating key timed out')
+
         if self._hmac.is_valid(data) != True:
             return None
         binary_data = self._aes.decrypt(data[32:])
