@@ -1,6 +1,7 @@
 # Work file
 gen.py
 work.py
+/tests
 
 # Save files
 *.session
