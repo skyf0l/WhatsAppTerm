@@ -1,35 +1,101 @@
 #!/usr/bin/python3
 
-from WhatsAppApi import Client, Color
+from WhatsAppApi import Client, Color, MessageType, MessageStubType
 
+import os, sys
 import time
 from datetime import datetime
 
-client = Client(debug=False, enable_trace=True, restore_sessions=True)
+import urwid
 
-while client.must_scan_qrcode():
-    qrcodes = client.get_qrcode()
-    print(qrcodes['small'])
-    client.qrcode_ready_to_scan()
+class Chat(object):
 
-chats = client.get_chats()
-for chat in chats:
-	print((chat['name'] + ' ' + chat['jid'] if chat['name'] is not None else chat['jid']) + (' ({})'.format(chat['not_read_count']) if chat['not_read_count'] > 0 else ''))
+    def __init__(self):
 
-time.sleep(2)
+        self._client = Client(debug=False, enable_trace=True, restore_sessions=True)
+        self._chat_id = -1
 
-chat = chats[0]
-messages = client.get_messages(chat['jid'])
-name = chat['name'] if chat['name'] is not None else chat['jid'].split('@')[0]
+        while self._client.must_scan_qrcode():
+            qrcodes = self._client.get_qrcode()
+            print(qrcodes['small'])
+            self._client.qrcode_ready_to_scan()
 
-print(name)
-for message in messages:
-	author = (Color.Green + 'You' + Color.Reset) if message['from_me'] else (Color.Blue + name + Color.Reset)
-	dt_object = datetime.fromtimestamp(message['at'])
-	date, hour = str(dt_object).split(' ')
-	print('{} <{}> {}'.format(hour, author, message['message']['text']))
+    def get_author_name(contact):
+        if contact is None:
+            return '???'
+        elif contact['short'] is not None:
+            return contact['short']
+        elif contact['name'] is not None:
+            return contact['name']
+        elif contact['notify'] is not None:
+            return contact['notify']
+        return contact['jid'].split('@')[0]
 
+    def display_chat(self):
+        chats = self._client.get_chats()
+        chat = chats[self._chat_id]
+        messages = self._client.get_messages(chat['jid'])
+        name = chat['name'] if chat['name'] is not None else chat['jid'].split('@')[0]
+
+        print('-> ' + name)
+        for message in messages:
+            if chat['type'] == 'user':
+                author = (Color.Green + 'You' + Color.Reset) if message['from_me'] else (Color.Blue + name + Color.Reset)
+            else:
+                author_contact = self._client.get_contact(message['participant'])
+                author = (Color.Green + 'You' + Color.Reset) if message['from_me'] else (Color.Blue + Chat.get_author_name(author_contact) + Color.Reset)
+            dt_object = datetime.fromtimestamp(message['at'])
+            date, hour = str(dt_object).split(' ')
+            print('{} <{}> {}{}'.format(hour, author,
+                message['message']['text'] if message['message']['text'] is not None else MessageType.to_string(message['message']['type']),
+                '' if message['message_stub'] is None else (' - ' + MessageStubType.to_string(message['message_stub']))))
+
+
+    def display_chats(self):
+        chats = self._client.get_chats()
+        for chat_id in range(len(chats)):
+            chat = chats[chat_id]
+            name = chat['name'] if chat['name'] is not None else chat['jid']
+            print('{}/ {} - ({})'.format(chat_id, name, chat['not_read_count']))
+            
+    def cmd_input(self, cmd):
+        if cmd == '/help':
+            print('/chats       see all chats')
+            print('/chat id     open chat number `id`')
+            return True
+        elif cmd == '/chats':
+            self.display_chats()
+            return True
+        elif cmd.split(' ')[0] == '/chat' and len(cmd.split(' ')) == 2:
+            try:
+                chat_id = int(cmd.split(' ')[1])
+            except Exception:
+                return False
+            self._chat_id = chat_id
+            self.display_chat()
+            return True
+        return False
+
+    def run(self):
+        while True:
+            cmd = input('> ')
+            if self.cmd_input(cmd) == False:
+                print('invalid command, type \'/help\' for more information')
+
+
+"""
+for chat_id in range(2):
+    
 while True:
+    columns, rows = os.get_terminal_size(0)
     time.sleep(0.25)
+"""
+
+def main():
+    chat = Chat()
+    chat.run()
+
+if __name__ == "__main__":
+    main()
 
 # client.logout()
