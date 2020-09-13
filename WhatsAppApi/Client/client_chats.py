@@ -14,6 +14,7 @@ class ClientChats():
             if not self.is_in_chats(chat['jid']):
                 new_chat = {
                     'jid': chat['jid'],
+                    'type': 'user' if '@c.us' in chat['jid'] else 'group',
                     'not_read_count': int(chat['count']),
                     'total_count': 0,
                     'name': str(chat['name'], 'utf8') if 'name' in chat else None,
@@ -41,3 +42,8 @@ class ClientChats():
         # order chats by t
         self._chats.sort(key=lambda chat: chat['t'], reverse=True)
         self._chats_loaded = True
+
+    def get_chats(self):
+        if wait_until(lambda self: self._chats_loaded == True, self._timeout, self=self) == False:
+            raise TimeoutError('Receive chats timed out')
+        return self._chats
