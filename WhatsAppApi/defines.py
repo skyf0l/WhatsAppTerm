@@ -1,4 +1,4 @@
-from .whatsapp_protobuf_pb2 import WebMessageInfo
+from .BinaryMessages.whatsapp_protobuf_pb2 import WebMessageInfo
 
 import json
 from google.protobuf import json_format

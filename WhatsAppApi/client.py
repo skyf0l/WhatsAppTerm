@@ -15,8 +15,8 @@ from .qrcode import render_qrcode, gen_qrcode
 
 from enum import Enum, unique
 
-from .binary_reader import read_binary
-from .binary_writer import write_binary
+from .BinaryMessages.binary_reader import read_binary
+from .BinaryMessages.binary_writer import write_binary
 
 from .defines import *
 from .utilities import *

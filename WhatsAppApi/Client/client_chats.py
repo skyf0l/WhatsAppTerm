@@ -25,6 +25,9 @@ class ClientChats():
                     'status_at': 0
                 }
                 self._chats.append(new_chat)
+            else:
+                eprint_report('Chat already in _chats: {}'.format(chat))
+
         except Exception as e:
             eprint_report('Invalid chat data: {}'.format(chat), add_traceback=True)
         

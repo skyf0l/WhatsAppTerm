@@ -1,4 +1,4 @@
-from .defines import Tags, ByteTokens, WebMessage
+from ..defines import Tags, ByteTokens, WebMessage
 
 """
 inspired by
