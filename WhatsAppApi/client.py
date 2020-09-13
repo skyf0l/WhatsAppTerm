@@ -50,7 +50,7 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
     # chats
     _frequent_contacts = []
     _frequent_contacts_loaded = False
-    _contacts = []
+    _contacts = {}
     _contacts_loaded = False
     _chats = []
     _chats_loaded = False
@@ -447,11 +447,6 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
 
     def get_qrcode(self):
         return self._qrcode['qrcode']
-
-    def get_chats(self):
-        if wait_until(lambda self: self._chats_loaded == True, self._timeout, self=self) == False:
-            raise TimeoutError('Receive chats timed out')
-        return self._chats
 
     def get_messages(self, jid):
         if jid not in self._chats_messages:

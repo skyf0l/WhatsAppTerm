@@ -18,7 +18,7 @@ class ClientMessages():
                     'text': None,
                     'content': None
                 },
-                'participant' : message['participant'] if 'participant' in message else None,
+                'participant' : message['participant'].replace('s.whatsapp.net', 'c.us') if 'participant' in message else jid,
                 'message_stub' : MessageStubType.get(message['messageStubType']) if 'messageStubType' in message else MessageStubType.Unknown,
                 'message_stub_parameters' : message['messageStubParameters'] if 'messageStubParameters' in message else None,
                 'status': MessageStatus.Error if 'status' not in message else MessageStatus.get(message['status'])
