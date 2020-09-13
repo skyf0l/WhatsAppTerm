@@ -22,7 +22,13 @@ class ClientContacts:
                     'short': data['short'] if 'short' in data else None
                     # unused data['verify']
                 }
-                self._contacts.append(new_contact)
+                if type(new_contact['notify']) is bytes:
+                    new_contact['notify'] = str(new_contact['notify'], 'utf8')
+                if type(new_contact['name']) is bytes:
+                    new_contact['name'] = str(new_contact['name'], 'utf8')
+                if type(new_contact['short']) is bytes:
+                    new_contact['short'] = str(new_contact['short'], 'utf8')
+                self._contacts[data['jid']] = new_contact
             else:
                 eprint_report('Unknown contact: {}'.format(contact))
         except Exception as e:
@@ -31,3 +37,15 @@ class ClientContacts:
     def add_contacts(self, contacts):
         for contact in contacts:
             self.add_contact(contact)
+
+    def get_contact(self, jid):
+        if wait_until(lambda self: self._contacts_loaded == True, self._timeout, self=self) == False:
+            raise TimeoutError('Receive contacts timed out')
+        if jid in self._contacts:
+            return self._contacts[jid]
+        return None
+
+    def get_contacts(self):
+        if wait_until(lambda self: self._contacts_loaded == True, self._timeout, self=self) == False:
+            raise TimeoutError('Receive contacts timed out')
+        return self._contacts
