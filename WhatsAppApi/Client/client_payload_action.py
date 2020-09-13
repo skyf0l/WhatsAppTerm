@@ -14,12 +14,7 @@ class ClientPayloadAction():
             return True
 
         elif name == 'contacts' and content == {'type': 'frequent'}:
-            for contact in data:
-                frequent_contact = {
-                    'jid': contact[1]['jid'],
-                    'type': contact[0]
-                }
-                self._frequent_contacts.append(frequent_contact)
+            self.add_frequent_contacts(data)
             self._frequent_contacts_loaded = True
             return True
 
@@ -48,6 +43,8 @@ class ClientPayloadAction():
             return True
 
         if dict_in({'type': 'contacts'}, content) and 'checksum' in content:
+            self.add_contacts(data)
+            self._contacts_loaded = True
             return True
 
         return False

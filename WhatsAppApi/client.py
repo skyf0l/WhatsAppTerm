@@ -26,6 +26,7 @@ from .session import load_session, save_session
 
 from .Client.client_chats import ClientChats
 from .Client.client_messages import ClientMessages
+from .Client.client_contacts import ClientContacts
 from .Client.client_payload_action import ClientPayloadAction
 
 @unique
@@ -34,7 +35,7 @@ class State(Enum):
     OPEN = 1
     CLOSED = 2
 
-class Client(ClientChats, ClientMessages, ClientPayloadAction):
+class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
 
     # constants
     whatsapp_wss_url = 'wss://web.whatsapp.com/ws'
@@ -47,10 +48,12 @@ class Client(ClientChats, ClientMessages, ClientPayloadAction):
     _expected_message_tags = []
 
     # chats
-    _frequent_contacts_loaded = False
     _frequent_contacts = []
-    _chats_loaded = False
+    _frequent_contacts_loaded = False
+    _contacts = []
+    _contacts_loaded = False
     _chats = []
+    _chats_loaded = False
     _chats_messages = {}
 
     # other
