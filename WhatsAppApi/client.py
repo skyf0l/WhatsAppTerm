@@ -24,13 +24,17 @@ from .security import *
 
 from .session import load_session, save_session
 
+from .Client.client_chats import ClientChats
+from .Client.client_messages import ClientMessages
+from .Client.client_payload_action import ClientPayloadAction
+
 @unique
 class State(Enum):
     OPENING = 0
     OPEN = 1
     CLOSED = 2
 
-class Client(object):
+class Client(ClientChats, ClientMessages, ClientPayloadAction):
 
     # constants
     whatsapp_wss_url = 'wss://web.whatsapp.com/ws'
@@ -277,145 +281,6 @@ class Client(object):
         self._presence_thread.daemon = True
         self._presence_thread.start()
 
-    def set_battery(self, battery):
-        self._battery['value'] = battery['value']
-        self._battery['live'] = battery['live'] == 'true'
-        self._battery['powersave'] = battery['powersave'] == 'true'
-
-    def add_message(self, message):
-        try:
-            jid = message['key']['remoteJid'].replace('s.whatsapp.net', 'c.us')
-            if jid not in self._chats_messages:
-                self._chats_messages[jid] = []
-
-            msg = {
-                'id': message['key']['id'],
-                'from_me': message['key']['fromMe'],
-                'at': int(message['messageTimestamp']),
-                'message': {
-                    'type': MessageType.get(list(message['message'].keys())[0]) if 'message' in message else MessageType.NoMessage,
-                    'text': None,
-                    'content': None
-                },
-                'participant' : message['participant'] if 'participant' in message else None,
-                'message_stub' : MessageStubType.get(message['messageStubType']) if 'messageStubType' in message else MessageStubType.Unknown,
-                'message_stub_parameters' : message['messageStubParameters'] if 'messageStubParameters' in message else None,
-                'status': MessageStatus.Error if 'status' not in message else MessageStatus.get(message['status'])
-            }
-
-            if msg['message']['type'] != MessageType.NoMessage:
-                message_content = message['message'][list(message['message'].keys())[0]]
-                if msg['message']['type'] == MessageType.Conversation:
-                    msg['message']['text'] = message_content
-                elif msg['message']['type'] == MessageType.ExtendedTextMessage:
-                    msg['message']['text'] = message_content['text']
-                elif msg['message']['type'] == MessageType.ImageMessage:
-                    if 'caption' in message_content:
-                        msg['message']['text'] = message_content['caption']
-                elif msg['message']['type'] == MessageType.VideoMessage:
-                    if 'caption' in message_content:
-                        msg['message']['text'] = message_content['caption']
-                elif msg['message']['type'] == MessageType.AudioMessage:
-                    pass
-                elif msg['message']['type'] == MessageType.StickerMessage:
-                    pass
-                else:
-                    eprint_report('Unknown message type: {}'.format(message))
-
-            self._chats_messages[jid].insert(0, msg)
-        except Exception as e:
-            eprint_report('Invalid chat message: {}'.format(message), add_traceback=True)
-
-    def add_messages(self, messages):
-        for message in messages[::-1]:
-            self.add_message(message)
-
-    def action(self, action):
-        if action[1] == None:
-            content = action[2][0]
-            if content[0] == 'battery':
-                battery = content[1]
-                self.set_battery(battery)
-                return True
-            elif content[0] == 'contacts':
-                if 'type' in content[1] and content[1]['type'] == 'frequent':
-                    contacts = content[2]
-                    for contact in contacts:
-                        frequent_contact = {
-                            'jid': contact[1]['jid'],
-                            'type': contact[0]
-                        }
-                        self._frequent_contacts.append(frequent_contact)
-                    return True
-
-        elif 'add' in action[1]:
-            if action[1]['add'] == 'last':
-                messages = action[2]
-                self.add_messages(messages)
-                return True
-            elif action[1]['add'] == 'before':
-                if 'last' in action[1] and action[1]['last'] == 'true':
-                    messages = action[2]
-                    self.add_messages(messages)
-                    return True
-            elif action[1]['add'] == 'relay':
-                messages = action[2]
-                self.add_messages(messages)
-                return True
-            elif action[1]['add'] == 'update':
-                messages = action[2]
-                self.add_messages(messages)
-                return True
-
-        return False
-
-    def is_in_chats(self, jid):
-        for chat in self._chats:
-            if chat['jid'] == jid:
-                return True
-        return False
-
-    def add_chat(self, chat):
-        try:
-            if not self.is_in_chats(chat['jid']):
-                new_chat = {
-                    'jid': chat['jid'],
-                    'not_read_count': int(chat['count']),
-                    'total_count': 0,
-                    'name': str(chat['name'], 'utf8') if 'name' in chat else None,
-                    't': int(chat['t']),
-                    'mute': int(chat['mute']),
-                    'modify_tag': chat['modify_tag'] if 'modify_tag' in chat else None,
-                    'spam': chat['spam'] == 'true' if 'spam' in chat else None,
-                    'status': UserStatus.Unknown,
-                    'status_at': 0
-                }
-                self._chats.append(new_chat)
-        except Exception as e:
-            eprint_report('Invalid chat data: {}'.format(chat), add_traceback=True)
-
-    def order_chats(self):
-        self._chats.sort(key=lambda chat: chat['t'], reverse=True)
-        
-    def add_chats(self, chats):
-        for chat in chats:
-            if len(chat) == 3 and chat[0] == 'chat' and chat[2] == None:
-                self.add_chat(chat[1])
-            else:
-                eprint_report('Unknown chat format: {}'.format(chat))
-        self.order_chats()
-        self._chats_loaded = True
-
-    def response(self, action):
-        if 'type' in action[1] and action[1]['type'] == 'chat':
-            self.add_chats(action[2])
-            return True
-
-        if 'type' in action[1] and action[1]['type'] == 'contacts':
-            return True
-
-        return False
-
     def send_text_message(self, number, text):
         # in work
         messageId = '3EB0' + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
@@ -528,16 +393,9 @@ class Client(object):
                 self._received_msgs[message_tag] = msg_data
                 return
 
-            if 'json' in msg_data and type(msg_data['json']) is list and len(msg_data['json']) == 3:
-                if msg_data['json'][0] == 'action':
-                    if not self.action(msg_data['json']):
-                        print_unknown_msg(message_tag, msg_data)
-                elif msg_data['json'][0] == 'response':
-                    if not self.response(msg_data['json']):
-                        print_unknown_msg(message_tag, msg_data)
-                else:
+            if 'json' in msg_data and type(msg_data['json']) is list and len(msg_data['json']) >= 1:
+                if not self.payload_action(msg_data['json']):
                     print_unknown_msg(message_tag, msg_data)
-                    self._received_msgs[message_tag] = msg_data
             else:
                 print_unknown_msg(message_tag, msg_data)
                 self._received_msgs[message_tag] = msg_data
