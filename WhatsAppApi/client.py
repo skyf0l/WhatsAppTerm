@@ -22,8 +22,7 @@ from .defines import *
 from .utilities import *
 from .security import *
 
-from .session import load_session, save_session
-
+from .Client.client_session import ClientSession
 from .Client.client_chats import ClientChats
 from .Client.client_messages import ClientMessages
 from .Client.client_contacts import ClientContacts
@@ -35,7 +34,9 @@ class State(Enum):
     OPEN = 1
     CLOSED = 2
 
-class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
+class Client(ClientSession,
+    ClientChats, ClientMessages, ClientContacts,
+    ClientPayloadAction):
 
     # constants
     whatsapp_wss_url = 'wss://web.whatsapp.com/ws'
@@ -66,7 +67,7 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
     def __init__(self,
         debug=False, enable_trace=False, trace_truncate=100,
         timeout=10,
-        restore_sessions=False,
+        session_path=None,
         on_open=None, on_close=None,
         long_browser_desc='Python Whatsapp Client', short_browser_desc='Whatsapp Client'):
         #websocket.enableTrace(True)
@@ -77,7 +78,7 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
         self._state = State.OPENING
 
         self._timeout = timeout
-        self._restore_sessions = restore_sessions
+        self._session_path = session_path
 
         self._on_open = on_open
         self._on_close = on_close
@@ -113,7 +114,7 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
         connection_query_name = 'connection_query'
         self._expected_message_tags.append(connection_query_name)
         connection_query_json = ['admin', 'init', self._whatsappweb_version, self._browser_desc, self._clientId, True]
-        self.__send(connection_query_name, connection_query_json)
+        self.ws_send(connection_query_name, connection_query_json)
         connection_result = self.wait_query_pop_json(connection_query_name)
 
         if connection_result['status'] != 200:
@@ -127,7 +128,7 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
             'time' : connection_result['time']}
         self._qrcode['timeout'] = time.time() + self._qrcode['ttl']
 
-        if self._restore_sessions and os.path.exists(Client.default_save_session_path):
+        if self._session_path and os.path.exists(self._session_path):
             self.restore_session()
             self.post_login()
         else:
@@ -158,77 +159,13 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
         self._battery['live'] = self._conn['plugged']
         return True
 
-    def restore_session(self):
-        session_data = load_session(Client.default_save_session_path)
-        if session_data is None:
-            raise ValueError('Invalid session data')
-        self._clientId = session_data['clientId']
-        self._clientToken = session_data['clientToken']
-        self._serverToken = session_data['serverToken']
-        self._encKey = session_data['encKey']
-        self._macKey = session_data['macKey']
-
-        self._aes = Aes(self._encKey)
-        self._hmac = Hmac(self._macKey)
-
-        restore_query_name = 'restore_query'
-        self._expected_message_tags.append(restore_query_name)
-        restore_query_json = ['admin', 'login', self._clientToken, self._serverToken, self._clientId, 'takeover']
-        self.__send(restore_query_name, restore_query_json)
-
-        # return error or challenge
-        if wait_until(lambda self: restore_query_name in self._received_msgs or self.find_json_in_received_msgs('Cmd') != None, self._timeout, self=self) == False:
-            raise TimeoutError('Receive message timed out')
-
-        if self.find_json_in_received_msgs('Cmd') != None:
-            self.resolve_challenge()
-
-        restore_result = self.wait_query_pop_json(restore_query_name)
-        if restore_result['status'] == 401:
-            raise ConnectionRefusedError('Unpaired from the phone')
-        if restore_result['status'] == 403:
-            raise ConnectionRefusedError('Access denied')
-        if restore_result['status'] == 405:
-            raise ConnectionRefusedError('Already logged in')
-        if restore_result['status'] == 409:
-            raise ConnectionRefusedError('Logged in from another location')
-        if restore_result['status'] != 200:
-            raise ConnectionRefusedError('Restore session refused')
-
-        if self.load_s1234_queries() == False:
-            raise TimeoutError('Query timed out')
-
-        if self._restore_sessions:
-            save_session(self, Client.default_save_session_path)
-            if self._debug:
-                print('Session saved')
-        if self._debug:
-            print('Session restored')
-
-    def resolve_challenge(self):
-        cmd_result = self.wait_json_pop_json('Cmd')[1]
-        if cmd_result['type'] != 'challenge':
-            raise Exception('Challenge expected')
-
-        challenge = b64decode(cmd_result['challenge'])
-        signed_challenge = self._hmac.hash(challenge)
-
-        challenge_query_name = 'challenge'
-        self._expected_message_tags.append(challenge_query_name)
-        challenge_query_json = ['admin', 'challenge', str(b64encode(signed_challenge), 'utf8'), self._serverToken, self._clientId]
-        self.__send(challenge_query_name, challenge_query_json)
-        challenge_result = self.wait_query_pop_json(challenge_query_name)
-
-        if challenge_result['status'] != 200:
-            raise ConnectionRefusedError('Challenge refused')
-
     def regen_qrcode(self):
         self._qrcode['id'] += 1
 
         new_qrcode_query_name = '{}.{}'.format('new_qrcode_query', '--{}'.format(self._qrcode['id']))
         self._expected_message_tags.append(new_qrcode_query_name)
         new_qrcode_query_json = ['admin', 'Conn', 'reref']
-        self.__send(new_qrcode_query_name, new_qrcode_query_json)
+        self.ws_send(new_qrcode_query_name, new_qrcode_query_json)
         new_qrcode_result = self.wait_query_pop_json(new_qrcode_query_name)
 
         if new_qrcode_result['status'] != 200:
@@ -252,10 +189,8 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
 
         self.generate_keys()
 
-        if self._restore_sessions:
-            save_session(self, Client.default_save_session_path)
-            if self._debug:
-                print('Session saved')
+        if self._session_path != None:
+            self.save_session()
         self._qrcode['must_scan'] = False
 
         self.post_login()
@@ -293,7 +228,7 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
         encryptedMessage = self.encrypt_msg(write_binary(msgData))
         payload = b'\x10\x80' + encryptedMessage
 
-        self.__send(messageId, payload)
+        self.ws_send(messageId, payload)
         self._nb_msg_sent += 1
 
     # close session -> must to rescan the qrcode
@@ -301,11 +236,11 @@ class Client(ClientChats, ClientMessages, ClientContacts, ClientPayloadAction):
         loggout_query_name = 'goodbye'
         self._expected_message_tags.append(loggout_query_name)
         loggout_query_json = ['admin','Conn','disconnect']
-        self.__send(loggout_query_name + ',', loggout_query_json)
+        self.ws_send(loggout_query_name + ',', loggout_query_json)
         self.wait_query(loggout_query_name)
         self._ws.close()
 
-    def __send(self, message_tag, payload):
+    def ws_send(self, message_tag, payload):
         msg = message_tag + ','
         if type(payload) in (dict, list):
             msg += json.dumps(payload)

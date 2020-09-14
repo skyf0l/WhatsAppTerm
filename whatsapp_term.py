@@ -12,7 +12,7 @@ class Chat(object):
 
     def __init__(self):
 
-        self._client = Client(debug=False, enable_trace=True, restore_sessions=True)
+        self._client = Client(debug=False, enable_trace=True, session_path='current.session')
         self._chat_id = -1
 
         while self._client.must_scan_qrcode():
