@@ -6,6 +6,14 @@ from ..security import *
 
 class ClientSession():
 
+    def logout(self):
+        loggout_query_name = 'goodbye'
+        self._expected_message_tags.append(loggout_query_name)
+        loggout_query_json = ['admin','Conn','disconnect']
+        self.ws_send(loggout_query_name + ',', loggout_query_json)
+        self.wait_query(loggout_query_name)
+        self._ws.close()
+
     '''
     session_data:
         clientId,

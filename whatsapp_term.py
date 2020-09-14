@@ -78,7 +78,10 @@ class Chat(object):
 
     def run(self):
         while True:
-            cmd = input('> ')
+            try:
+                cmd = input('> ')
+            except EOFError:
+                break
             if self.cmd_input(cmd) == False:
                 print('invalid command, type \'/help\' for more information')
 
