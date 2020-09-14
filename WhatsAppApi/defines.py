@@ -3,6 +3,14 @@ from .BinaryMessages.whatsapp_protobuf_pb2 import WebMessageInfo
 import json
 from google.protobuf import json_format
 
+from enum import Enum, unique
+
+@unique
+class State(Enum):
+    OPENING = 0
+    OPEN = 1
+    CLOSED = 2
+
 """
 WebMessage, Tags, ByteTokens and Metrics are inspired by
     https://github.com/sigalor/whatsapp-web-reveng/blob/master/backend/whatsapp_defines.py
