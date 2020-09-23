@@ -1,10 +1,21 @@
 # WhatsAppTerm
-A WhatsApp Client in Terminal
+A WhatsApp Client in terminal, console or tty !
+
+The application connects directly to the API of WhatsApp Web without intermediary
+
+# Features
+- Send and receive messages from users **(Not yet)**
+- Show all conversations
+- Save and resume session without scanning the QRCode
 
 # Installation
 To install dependencies
 ```
-pip install --user -r requirements.txt
+pip3 install --user -r requirements.txt
+```
+Or
+```
+python3 -m pip install --user -r requirements.txt
 ```
 
 # Legal

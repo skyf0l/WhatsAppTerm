@@ -1,5 +1,6 @@
 websocket
 websocket-client
+pycryptodome==3.4.3 # Crypto.Random 
 curve25519-donna
 hkdf
 pyqrcode
