@@ -147,7 +147,6 @@ class MessageStatus:
         return MessageStatus.keys[value]
 
 class MessageType:
-    NoMessage                                  = -1
     Conversation                               = 0
     SenderKeyDistributionMessage               = 1
     ImageMessage                               = 2
@@ -171,18 +170,17 @@ class MessageType:
     TemplateMessage                            = 20
     StickerMessage                             = 21
 
-    keys = ['noMessage', 'conversation', 'senderKeyDistributionMessage', 'imageMessage', 'contactMessage', 'locationMessage', 'extendedTextMessage', 'documentMessage', 'audioMessage', 'videoMessage', 'call', 'chat', 'protocolMessage', 'contactsArrayMessage', 'highlyStructuredMessage', 'fastRatchetKeySenderKeyDistributionMessage', 'sendPaymentMessage', 'liveLocationMessage', 'requestPaymentMessage', 'declinePaymentRequestMessage', 'cancelPaymentRequestMessage', 'templateMessage', 'stickerMessage']
+    keys = ['conversation', 'senderKeyDistributionMessage', 'imageMessage', 'contactMessage', 'locationMessage', 'extendedTextMessage', 'documentMessage', 'audioMessage', 'videoMessage', 'call', 'chat', 'protocolMessage', 'contactsArrayMessage', 'highlyStructuredMessage', 'fastRatchetKeySenderKeyDistributionMessage', 'sendPaymentMessage', 'liveLocationMessage', 'requestPaymentMessage', 'declinePaymentRequestMessage', 'cancelPaymentRequestMessage', 'templateMessage', 'stickerMessage']
 
     def get(value):
         for key_id in range(len(MessageType.keys)):
             if value == MessageType.keys[key_id]:
-                return key_id - 1
+                return key_id
         raise ValueError('MessageType {} unexist'.format(value))
 
     def to_string(value):
-        value += 1
         if value < 0 or value >= len(MessageType.keys):
-            raise ValueError('MessageType key_id {} unexist'.format(value - 1))
+            raise ValueError('MessageType key_id {} unexist'.format(value))
         return MessageType.keys[value]
 
 class MessageStubType:

@@ -12,8 +12,9 @@ class Chat(object):
 
     def __init__(self):
 
-        self._client = Client(debug=False, enable_trace=True, session_path='current.session')
+        self._client = Client(enable_trace=True, session_path='current.session')
         self._chat_id = -1
+        self._chats = None
 
         while self._client.must_scan_qrcode():
             qrcodes = self._client.get_qrcode()
@@ -32,8 +33,8 @@ class Chat(object):
         return contact['jid'].split('@')[0]
 
     def display_chat(self):
-        chats = self._client.get_chats()
-        chat = chats[self._chat_id]
+        self._chats = self._client.get_chats()
+        chat = self._chats[self._chat_id]
         messages = self._client.get_messages(chat['jid'])
         name = chat['name'] if chat['name'] is not None else chat['jid'].split('@')[0]
 
@@ -46,15 +47,18 @@ class Chat(object):
                 author = (Color.Green + 'You' + Color.Reset) if message['from_me'] else (Color.Blue + Chat.get_author_name(author_contact) + Color.Reset)
             dt_object = datetime.fromtimestamp(message['at'])
             date, hour = str(dt_object).split(' ')
-            print('{} <{}> {}{}'.format(hour, author,
-                message['message']['text'] if message['message']['text'] is not None else MessageType.to_string(message['message']['type']),
-                '' if message['message_stub'] is None else (' - ' + MessageStubType.to_string(message['message_stub']))))
+            if message['message'] is not None:
+                print('{} <{}> {}'.format(hour, author,
+                    message['message']['text'] if message['message'] is not None and message['message']['text'] is not None else MessageType.to_string(message['message']['type'])))
+            if message['message_stub'] is not None:
+                print('{} <{}> {} - {}'.format(hour, author, MessageStubType.to_string(message['message_stub']), message['message_stub_parameters']))
 
 
     def display_chats(self):
-        chats = self._client.get_chats()
-        for chat_id in range(len(chats)):
-            chat = chats[chat_id]
+        self._chats = self._client.get_chats()
+        self._chat_id = -1
+        for chat_id in range(len(self._chats)):
+            chat = self._chats[chat_id]
             name = chat['name'] if chat['name'] is not None else chat['jid']
             print('{}/ {} - ({})'.format(chat_id, name, chat['not_read_count']))
             
@@ -74,6 +78,9 @@ class Chat(object):
             self._chat_id = chat_id
             self.display_chat()
             return True
+        elif len(cmd) > 0 and cmd[0] != '/' and self._chat_id != -1:
+            self._client.send_text_message(self._chats[self._chat_id]['jid'], cmd)
+            return True
         return False
 
     def run(self):
@@ -85,20 +92,9 @@ class Chat(object):
             if self.cmd_input(cmd) == False:
                 print('invalid command, type \'/help\' for more information')
 
-
-"""
-for chat_id in range(2):
-    
-while True:
-    columns, rows = os.get_terminal_size(0)
-    time.sleep(0.25)
-"""
-
 def main():
     chat = Chat()
     chat.run()
 
 if __name__ == "__main__":
     main()
-
-# client.logout()
