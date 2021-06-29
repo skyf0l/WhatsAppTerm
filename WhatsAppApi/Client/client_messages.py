@@ -1,3 +1,9 @@
+import binascii
+
+from Crypto import Random
+
+from ..BinaryMessages.binary_writer import write_binary
+
 from ..defines import *
 from ..utilities import *
 
@@ -269,3 +275,15 @@ class ClientMessages():
     def add_messages(self, messages):
         for message in messages[::-1]:
             self.add_message(message)
+
+    def send_text_message(self, number, text):
+        messageId = '3EB0' + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
+
+        number = number.split('@')[0]
+        messageParams = {'key': {'fromMe': True, 'remoteJid': number + '@s.whatsapp.net', 'id': messageId},'messageTimestamp': get_timestamp(), 'status': 1, 'message': {'conversation': text}}
+        msgData = ['action', {'type': 'relay', 'epoch': str(self._nb_msg_sent)},[['message', None, WebMessage.encode(messageParams)]]]
+        encryptedMessage = self.encrypt_msg(write_binary(msgData))
+        payload = b'\x10\x80' + encryptedMessage
+
+        self.ws_send(messageId, payload, trace_payload=msgData)
+        self._nb_msg_sent += 1

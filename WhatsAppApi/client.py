@@ -4,7 +4,6 @@ import json
 import os
 import sys
 
-import binascii
 from base64 import b64encode, b64decode
 
 import curve25519
@@ -150,18 +149,6 @@ class Client(ClientWebSocket,
 
     def post_login(self):
         self.run_presence_loop()
-
-    def send_text_message(self, number, text):
-        # in work
-        messageId = '3EB0' + str(binascii.hexlify(Random.get_random_bytes(8)).upper(), 'utf8')
-
-        messageParams = {'key': {'fromMe': True, 'remoteJid': number + '@s.whatsapp.net', 'id': messageId},'messageTimestamp': get_timestamp(), 'status': 1, 'message': {'conversation': text}}
-        msgData = ['action', {'type': 'relay', 'epoch': str(self._nb_msg_sent)},[['message', None, WebMessage.encode(messageParams)]]]
-        encryptedMessage = self.encrypt_msg(write_binary(msgData))
-        payload = b'\x10\x80' + encryptedMessage
-
-        self.ws_send(messageId, payload)
-        self._nb_msg_sent += 1
 
     def find_json_in_received_msgs(self, json_name):
         for key in self._received_msgs.keys():

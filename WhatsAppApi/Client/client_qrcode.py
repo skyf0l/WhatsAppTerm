@@ -1,5 +1,6 @@
 import base64
 import pyqrcode
+import time
 
 def split_by_line(string, line):
     splited = []

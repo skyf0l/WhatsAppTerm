@@ -28,7 +28,7 @@ class ClientWebSocket():
         self._ws_thread.daemon = True
         self._ws_thread.start()
 
-    def ws_send(self, message_tag, payload):
+    def ws_send(self, message_tag, payload, trace_payload=None):
         msg = message_tag + ','
         if type(payload) in (dict, list):
             msg += json.dumps(payload)
@@ -37,11 +37,12 @@ class ClientWebSocket():
         else:
             msg += payload
 
-        if self._enable_trace:
-            if len(msg) > self._trace_truncate:
-                print('Send: {}'.format(msg[0:self._trace_truncate] + '...'))
+        if self._enable_trace and (type(msg) is not bytes or trace_payload is not None):
+            trace_msg = trace_payload if trace_payload is not None else msg
+            if len(trace_msg) > self._trace_truncate:
+                print('Send: {}'.format(trace_msg[0:self._trace_truncate] + '...'))
             else:
-                print('Send: {}'.format(msg))
+                print('Send: {}'.format(trace_msg))
         self._ws.send(msg)
 
     def __on_message(self, ws, msg):

@@ -14,6 +14,7 @@ class Chat(object):
 
         self._client = Client(enable_trace=True, session_path='current.session')
         self._chat_id = -1
+        self._chats = None
 
         while self._client.must_scan_qrcode():
             qrcodes = self._client.get_qrcode()
@@ -32,8 +33,8 @@ class Chat(object):
         return contact['jid'].split('@')[0]
 
     def display_chat(self):
-        chats = self._client.get_chats()
-        chat = chats[self._chat_id]
+        self._chats = self._client.get_chats()
+        chat = self._chats[self._chat_id]
         messages = self._client.get_messages(chat['jid'])
         name = chat['name'] if chat['name'] is not None else chat['jid'].split('@')[0]
 
@@ -54,9 +55,10 @@ class Chat(object):
 
 
     def display_chats(self):
-        chats = self._client.get_chats()
-        for chat_id in range(len(chats)):
-            chat = chats[chat_id]
+        self._chats = self._client.get_chats()
+        self._chat_id = -1
+        for chat_id in range(len(self._chats)):
+            chat = self._chats[chat_id]
             name = chat['name'] if chat['name'] is not None else chat['jid']
             print('{}/ {} - ({})'.format(chat_id, name, chat['not_read_count']))
             
@@ -75,6 +77,9 @@ class Chat(object):
                 return False
             self._chat_id = chat_id
             self.display_chat()
+            return True
+        elif len(cmd) > 0 and cmd[0] != '/' and self._chat_id != -1:
+            self._client.send_text_message(self._chats[self._chat_id]['jid'], cmd)
             return True
         return False
 

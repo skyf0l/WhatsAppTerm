@@ -61,7 +61,7 @@ def get_whatsappweb_version():
     headers = {'User-Agent':'Mozilla/75 Gecko/20100101 Firefox/76'}
 
     result = requests.get(url, headers=headers)
-    res = re.search(r'l=\"([0-9]+)\.([0-9]+)\.([0-9]+)\"', result.text)
+    res = re.search(r'\w=\"([0-9]+)\.([0-9]+)\.([0-9]+)\"', result.text)
     if res is None:
         raise ValueError('Can\'t find WhatsAppWeb version')
     return [int(res.group(1)), int(res.group(2)), int(res.group(3))]
